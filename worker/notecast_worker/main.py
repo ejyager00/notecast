@@ -206,11 +206,13 @@ class Worker:
             overrides["system"] = pcfg["ocr_system"]
         if "ocr_user" in pcfg:
             overrides["user"] = pcfg["ocr_user"]
+        # Convert every page first and send the JPEG copies right away: OCR
+        # takes minutes a page on the CPU, and HEIC originals don't display
+        # outside Safari, so otherwise the note shows broken images until the end.
         files: dict[str, bytes] = {}
-        texts: dict[int, str] = {}
-        prov: dict[str, Any] = {}
+        ocr_in: dict[int, bytes] = {}
         for i, p in enumerate(todo, 1):
-            hb.step(f"reading page {i} of {len(todo)}")
+            hb.step(f"preparing page {i} of {len(todo)}")
             raw = self.client.input(job, p["input"])
             try:
                 n = images.normalize(raw, ocr_long_edge=self.cfg.ocr_long_edge)
@@ -218,7 +220,16 @@ class Worker:
                 raise Permanent(f"page {i} isn't a readable image: {e}") from e
             files[f"display-{p['page_id']}.jpg"] = n.display
             files[f"thumb-{p['page_id']}.jpg"] = n.thumb
-            r = pipeline.ocr_page(ocr, n.ocr, **overrides)
+            ocr_in[p["page_id"]] = n.ocr
+        try:
+            self.client.previews(job, files)
+        except httpx.HTTPError as e:  # cosmetic; complete() sends them again
+            log.warning("job %s: previews not sent: %s", job["job_id"], e)
+        texts: dict[int, str] = {}
+        prov: dict[str, Any] = {}
+        for i, p in enumerate(todo, 1):
+            hb.step(f"reading page {i} of {len(todo)}")
+            r = pipeline.ocr_page(ocr, ocr_in[p["page_id"]], **overrides)
             texts[p["page_id"]] = r.markdown
             prov = {**r.provenance, "long_edge": self.cfg.ocr_long_edge}
         full = pipeline.join_pages(

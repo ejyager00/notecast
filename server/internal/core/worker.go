@@ -233,6 +233,60 @@ func (s *Service) Heartbeat(ctx context.Context, jobID int64, token, progress st
 	})
 }
 
+// Previews stores display and thumb JPEGs for a transcribe job's pages before
+// the job finishes, so the note shows its pages while OCR runs (originals are
+// often HEIC, which most non-Safari browsers can't show). out holds
+// display-<id>.jpg and thumb-<id>.jpg pairs; any subset of the job's pages.
+func (s *Service) Previews(ctx context.Context, jobID int64, token string, out map[string][]byte, w WorkerInfo) error {
+	return s.inTx(ctx, func(tx *sql.Tx, _ *bool) error {
+		now := s.now()
+		if err := seen(ctx, tx, w, now); err != nil {
+			return err
+		}
+		j, err := jobs.CheckLease(ctx, tx, jobID, token, now)
+		if err != nil {
+			return err
+		}
+		if j.Kind != notes.Transcribe {
+			return fmt.Errorf("%w: previews are for transcribe jobs", ErrInvalid)
+		}
+		var p struct {
+			PageIDs []int64 `json:"page_ids"`
+		}
+		if err := json.Unmarshal([]byte(j.Params), &p); err != nil {
+			return err
+		}
+		var pid string
+		if err := tx.QueryRowContext(ctx, `SELECT pid FROM notes WHERE id = ?`, j.NoteID).Scan(&pid); err != nil {
+			return err
+		}
+		var got int
+		for _, id := range p.PageIDs {
+			display, thumb := out[fmt.Sprintf("display-%d.jpg", id)], out[fmt.Sprintf("thumb-%d.jpg", id)]
+			if display == nil && thumb == nil {
+				continue
+			}
+			if !files.IsJPEG(display) || !files.IsJPEG(thumb) {
+				return fmt.Errorf("%w: page %d needs display and thumb JPEGs", ErrInvalid, id)
+			}
+			if err := s.files.WriteFile(s.files.PageDisplay(pid, id), display); err != nil {
+				return err
+			}
+			if err := s.files.WriteFile(s.files.PageThumb(pid, id), thumb); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE pages SET has_display = 1 WHERE id = ? AND note_id = ?`, id, j.NoteID); err != nil {
+				return err
+			}
+			got += 2
+		}
+		if got != len(out) {
+			return fmt.Errorf("%w: previews for pages outside this job", ErrInvalid)
+		}
+		return nil
+	})
+}
+
 // --- completion --------------------------------------------------------------
 
 type PageResult struct {

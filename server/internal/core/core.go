@@ -115,6 +115,17 @@ type Note struct {
 	Job              *jobs.Job // active job, if any
 }
 
+// Previews counts the pages that have a JPEG copy for display.
+func (n *Note) Previews() int {
+	c := 0
+	for _, p := range n.Pages {
+		if p.HasDisplay {
+			c++
+		}
+	}
+	return c
+}
+
 // Transcript is the note's pages joined in order, as the narrator sees it.
 func (n *Note) Transcript() string {
 	out := ""

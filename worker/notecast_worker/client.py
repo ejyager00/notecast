@@ -80,6 +80,14 @@ class Client:
         body = {"error": error[:2000], "retryable": retryable}
         self._check(self.http.post(url, json=body, headers=self._headers(job["lease_token"])))
 
+    def previews(self, job: dict[str, Any], files: dict[str, bytes]) -> None:
+        """Upload display/thumb JPEGs for a transcribe job's pages before OCR."""
+        url = f"{self.base_url}/worker/v1/jobs/{job['job_id']}/previews"
+        parts = [(name, (name, data, "image/jpeg")) for name, data in files.items()]
+        self._check(
+            self.http.post(url, files=parts, headers=self._headers(job["lease_token"]), timeout=120)
+        )
+
     def complete(
         self, job: dict[str, Any], result: dict[str, Any], files: dict[str, bytes]
     ) -> None:

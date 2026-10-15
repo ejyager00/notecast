@@ -42,6 +42,7 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /worker/v1/claim", a.authed(a.claim))
 	mux.Handle("GET /worker/v1/jobs/{id}/inputs/{name}", a.authed(a.input))
 	mux.Handle("POST /worker/v1/jobs/{id}/heartbeat", a.authed(a.heartbeat))
+	mux.Handle("POST /worker/v1/jobs/{id}/previews", a.authed(a.previews))
 	mux.Handle("POST /worker/v1/jobs/{id}/complete", a.authed(a.complete))
 	mux.Handle("POST /worker/v1/jobs/{id}/fail", a.authed(a.fail))
 	return mux
@@ -186,6 +187,57 @@ func limitFor(name string) int64 {
 	return 1 << 20
 }
 
+// readParts reads a multipart body: an optional "result" part (result.json)
+// plus one part per output file, each named by its file name. On error it has
+// already written the response.
+func readParts(w http.ResponseWriter, r *http.Request) (res *core.Result, out map[string][]byte, ok bool) {
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "multipart/form-data" {
+		http.Error(w, "want multipart/form-data", http.StatusUnsupportedMediaType)
+		return nil, nil, false
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, core.MaxAudioResult+64<<20)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, nil, false
+	}
+	out = map[string][]byte{}
+	for {
+		p, err := mr.NextPart()
+		if err == io.EOF {
+			return res, out, true
+		}
+		if err != nil {
+			http.Error(w, "bad multipart: "+err.Error(), http.StatusBadRequest)
+			return nil, nil, false
+		}
+		name := p.FormName()
+		if name == "result" {
+			res = new(core.Result)
+			if err := json.NewDecoder(io.LimitReader(p, 4<<20)).Decode(res); err != nil {
+				http.Error(w, "bad result json", http.StatusBadRequest)
+				return nil, nil, false
+			}
+			continue
+		}
+		if !outputName.MatchString(name) {
+			http.Error(w, fmt.Sprintf("unexpected part %q", name), http.StatusBadRequest)
+			return nil, nil, false
+		}
+		limit := limitFor(name)
+		b, err := io.ReadAll(io.LimitReader(p, limit+1))
+		if err != nil {
+			http.Error(w, "read: "+err.Error(), http.StatusBadRequest)
+			return nil, nil, false
+		}
+		if int64(len(b)) > limit {
+			http.Error(w, name+" too large", http.StatusRequestEntityTooLarge)
+			return nil, nil, false
+		}
+		out[name] = b
+	}
+}
+
 // complete takes multipart/form-data: a "result" part (result.json) plus one
 // part per output file, each named by its file name.
 func (a *API) complete(w http.ResponseWriter, r *http.Request) {
@@ -194,57 +246,44 @@ func (a *API) complete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "multipart/form-data" {
-		http.Error(w, "want multipart/form-data", http.StatusUnsupportedMediaType)
+	res, out, ok := readParts(w, r)
+	if !ok {
 		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, core.MaxAudioResult+64<<20)
-	mr, err := r.MultipartReader()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	var res *core.Result
-	out := map[string][]byte{}
-	for {
-		p, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			http.Error(w, "bad multipart: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		name := p.FormName()
-		if name == "result" {
-			res = new(core.Result)
-			if err := json.NewDecoder(io.LimitReader(p, 4<<20)).Decode(res); err != nil {
-				http.Error(w, "bad result json", http.StatusBadRequest)
-				return
-			}
-			continue
-		}
-		if !outputName.MatchString(name) {
-			http.Error(w, fmt.Sprintf("unexpected part %q", name), http.StatusBadRequest)
-			return
-		}
-		limit := limitFor(name)
-		b, err := io.ReadAll(io.LimitReader(p, limit+1))
-		if err != nil {
-			http.Error(w, "read: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		if int64(len(b)) > limit {
-			http.Error(w, name+" too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		out[name] = b
 	}
 	if res == nil {
 		http.Error(w, "missing result part", http.StatusBadRequest)
 		return
 	}
 	if err := a.Svc.Complete(r.Context(), id, r.Header.Get("X-Lease-Token"), *res, out, info(r)); err != nil {
+		a.fail500(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// previews takes multipart/form-data with display-<page>.jpg and
+// thumb-<page>.jpg parts for some of a transcribe job's pages.
+func (a *API) previews(w http.ResponseWriter, r *http.Request) {
+	id, ok := jobID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	res, out, ok := readParts(w, r)
+	if !ok {
+		return
+	}
+	for name := range out {
+		if !strings.HasSuffix(name, ".jpg") {
+			http.Error(w, fmt.Sprintf("unexpected part %q", name), http.StatusBadRequest)
+			return
+		}
+	}
+	if res != nil {
+		http.Error(w, "previews take no result part", http.StatusBadRequest)
+		return
+	}
+	if err := a.Svc.Previews(r.Context(), id, r.Header.Get("X-Lease-Token"), out, info(r)); err != nil {
 		a.fail500(w, r, err)
 		return
 	}

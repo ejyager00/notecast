@@ -5,7 +5,7 @@
 {{end}}
 
 {{define "job-status"}}
-<div id="job-status" class="banner info" {{if .Note.Job}}hx-get="/notes/{{.Note.PID}}/status" hx-trigger="every 4s" hx-swap="outerHTML"{{end}} aria-live="polite">
+<div id="job-status" class="banner info" {{if .Note.Job}}hx-get="/notes/{{.Note.PID}}/status?previews={{.Note.Previews}}" hx-trigger="every 4s" hx-swap="outerHTML"{{end}} aria-live="polite">
   <strong>{{statusLabel .Note.Status}}</strong> — {{.JobLabel}}
   {{if .Note.Job}}
   <form class="inline" method="post" action="/notes/{{.Note.PID}}/cancel"><button class="link" type="submit">Cancel</button></form>
@@ -17,7 +17,11 @@
 <div class="pages">
 {{range $i, $p := .Note.Pages}}
   <figure>
+    {{if or $p.HasDisplay (ne $p.Ext "heic")}}
     <img src="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/thumb" alt="Page {{add $i 1}}" loading="lazy">
+    {{else}}{{/* HEIC original, no JPEG copy yet: Safari shows it, other browsers get a placeholder until the worker sends one. */}}
+    <picture><source srcset="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/thumb" type="image/heic"><img src="/static/page-pending.svg?v={{$.Version}}" alt="Page {{add $i 1}} (preview coming)" loading="lazy"></picture>
+    {{end}}
     {{if $.Editable}}
     <figcaption>
       <form class="inline" method="post" action="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/up"><button class="link" type="submit" aria-label="Move page {{add $i 1}} earlier" {{if eq $i 0}}disabled{{end}}>↑</button></form>

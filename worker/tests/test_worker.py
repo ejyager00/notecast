@@ -22,6 +22,8 @@ class FakeClient:
         self.inputs = inputs or {}
         self.lose_lease = lose_lease
         self.completed: list[tuple[dict, dict]] = []
+        self.previewed: list[dict] = []
+        self.events: list[str] = []
         self.failed: list[tuple[str, bool]] = []
         self.status = Status()
 
@@ -31,6 +33,10 @@ class FakeClient:
     def heartbeat(self, job, progress):
         if self.lose_lease:
             raise LeaseLost("cancelled")
+
+    def previews(self, job, files):
+        self.events.append("previews")
+        self.previewed.append(files)
 
     def complete(self, job, result, files):
         self.completed.append((result, files))
@@ -44,9 +50,11 @@ class FakeChat:
 
     def __init__(self, fail: Exception | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.events: list[str] = []
         self.fail = fail
 
     def complete(self, system, user_text, images=None, json_schema=None, max_tokens=4096):
+        self.events.append("chat")
         self.calls.append(
             {"user": user_text, "images": len(images or []), "json": json_schema is not None}
         )
@@ -84,6 +92,7 @@ def job(kind: str, **kw) -> dict:
 
 def test_transcribe_ocrs_only_new_pages_and_narrates_whole_note():
     c, chat = FakeClient({"page-2": jpeg()}), FakeChat()
+    c.events = chat.events = []  # one shared log: previews must precede any OCR
     w = worker(c, chat)
     w.run(job("transcribe", transcribe=[2], pages=[
         {"page_id": 1, "position": 1, "transcript": "old page"},
@@ -93,6 +102,8 @@ def test_transcribe_ocrs_only_new_pages_and_narrates_whole_note():
     result, files = c.completed[0]
     assert result["pages"] == [{"page_id": 2, "transcript": "page text 1"}]
     assert set(files) == {"display-2.jpg", "thumb-2.jpg"}
+    assert c.previewed == [files], "previews go up early, and the same JPEGs again at the end"
+    assert c.events == ["previews", "chat", "chat"]
     assert files["display-2.jpg"][:3] == b"\xff\xd8\xff"
     narrate_input = chat.calls[1]["user"]
     assert "old page" in narrate_input and "page text 1" in narrate_input

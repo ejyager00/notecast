@@ -130,6 +130,22 @@ func (c *Client) Complete(job *core.Claimed, res core.Result, out map[string][]b
 	return err
 }
 
+// Previews uploads display/thumb JPEGs for a transcribe job's pages early.
+func (c *Client) Previews(job *core.Claimed, out map[string][]byte) error {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for name, data := range out {
+		fw, _ := mw.CreateFormFile(name, name)
+		fw.Write(data)
+	}
+	mw.Close()
+	resp, err := check(c.do("POST", fmt.Sprintf("/worker/v1/jobs/%d/previews", job.JobID), job.LeaseToken, &buf, mw.FormDataContentType()))
+	if err == nil {
+		resp.Body.Close()
+	}
+	return err
+}
+
 // Canned builds a plausible result for a claimed job.
 func Canned(job *core.Claimed) (core.Result, map[string][]byte) {
 	out := map[string][]byte{}

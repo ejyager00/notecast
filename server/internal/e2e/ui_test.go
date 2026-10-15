@@ -67,8 +67,8 @@ func TestPagesThroughLifecycle(t *testing.T) {
 	e.page("/notes/"+pid, "Read 1 page", "Hematology")
 
 	e.mustPost("/notes/"+pid+"/submit", nil)
-	e.page("/notes/"+pid, "Reading pages", "waiting for the processing machine to connect", `hx-get="/notes/`+pid+`/status"`)
-	if r, body := e.get("/notes/"+pid+"/status", "HX-Request", "true"); r.Header.Get("HX-Refresh") != "" || strings.Contains(body, "<html") {
+	e.page("/notes/"+pid, "Reading pages", "waiting for the processing machine to connect", `hx-get="/notes/`+pid+`/status?previews=0"`)
+	if r, body := e.get("/notes/"+pid+"/status?previews=0", "HX-Request", "true"); r.Header.Get("HX-Refresh") != "" || strings.Contains(body, "<html") {
 		t.Fatalf("status partial while running: refresh=%q", r.Header.Get("HX-Refresh"))
 	}
 

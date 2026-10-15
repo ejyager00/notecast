@@ -395,7 +395,9 @@ func (h *Web) status(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	if v.Note.Job == nil {
+	// Reload the whole page when the job ends, or when page previews arrived
+	// since it was rendered (the thumbnails aren't part of this partial).
+	if v.Note.Job == nil || r.URL.Query().Get("previews") != strconv.Itoa(v.Note.Previews()) {
 		w.Header().Set("HX-Refresh", "true")
 		w.WriteHeader(http.StatusOK)
 		return
