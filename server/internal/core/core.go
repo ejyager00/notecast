@@ -652,7 +652,7 @@ type Settings struct {
 	DefaultSpeed          float64
 	IllegiblePolicy       string // "skip" | "say"
 	FeedIncludeTranscript bool
-	FeedTokenSHA256       string
+	FeedToken             string // read-only here; see RotateFeedToken
 }
 
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
@@ -690,8 +690,8 @@ func loadSettings(ctx context.Context, tx *sql.Tx) (Settings, error) {
 			st.IllegiblePolicy = v
 		case "feed_include_transcript":
 			st.FeedIncludeTranscript = v == "true"
-		case "feed_token_sha256":
-			st.FeedTokenSHA256 = v
+		case "feed_token":
+			st.FeedToken = v
 		}
 	}
 	return st, rows.Err()
@@ -711,7 +711,6 @@ func (s *Service) SaveSettings(ctx context.Context, st Settings) error {
 			"default_speed":           strconv.FormatFloat(st.DefaultSpeed, 'f', -1, 64),
 			"illegible_policy":        st.IllegiblePolicy,
 			"feed_include_transcript": strconv.FormatBool(st.FeedIncludeTranscript),
-			"feed_token_sha256":       st.FeedTokenSHA256,
 		} {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)
 				ON CONFLICT (key) DO UPDATE SET value = excluded.value`, k, v); err != nil {

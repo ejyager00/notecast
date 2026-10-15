@@ -362,7 +362,7 @@ CREATE TABLE workers (
 
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- auto_approve, default_voice, default_speed, illegible_policy,
--- feed_include_transcript, feed_token_sha256
+-- feed_include_transcript, feed_token
 
 CREATE VIRTUAL TABLE notes_fts USING fts5(
   title, tags, summary, transcript, narration,
@@ -418,9 +418,11 @@ leaves out `transcribe` and `narrate` when the GPU guard trips (§6.3), so
 
 ### 4.7 Feeds
 
-- One feed token, 32 random bytes base64url, shown once in Settings. Only
-  `sha256` is stored, compared in constant time. Rotating it invalidates every
-  feed URL; she then re-adds the feed.
+- One feed token, 32 random bytes base64url. **Stored as-is, not hashed**
+  (changed during Phase 6): anyone who can read the database can already read
+  every note, so a hash protects nothing, and keeping the token lets Settings
+  show the feed URLs whenever they're needed. Compared in constant time.
+  Rotating it invalidates every feed URL; she then re-adds the feed.
 - `GET /feed/{token}/all.xml` lists every `ready` note. `GET
   /feed/{token}/c/{collection_id}.xml` serves one feed per collection. **Each
   collection appears in her podcast app as its own show**, which is the main
@@ -724,7 +726,7 @@ workout-pwa-rs.
 - [ ] JWT signature, `aud`, `iss` and `exp` verified, and email allowlisted, on
       every public non-feed route.
 - [ ] Origin check on every non-GET request.
-- [ ] Feed token: 256-bit, hashed at rest, constant-time compare, rotatable.
+- [ ] Feed token: 256-bit, constant-time compare, rotatable (stored as-is; see §4.7).
 - [ ] Worker token: hashed at rest on the server; the worker listener is never
       proxied.
 - [ ] `DEV_AUTH_EMAIL` refuses non-loopback binds.

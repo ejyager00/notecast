@@ -18,6 +18,7 @@ type Web struct {
 	Svc     *core.Service
 	Log     *slog.Logger
 	Version string // cache-busts static assets; "dev" disables caching
+	Origin  string // PUBLIC_ORIGIN, for absolute URLs in feeds
 
 	tmpl templates
 }
@@ -35,6 +36,7 @@ func (h *Web) Handlers() (app, open http.Handler, err error) {
 
 	openMux := http.NewServeMux()
 	openMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	h.feedRoutes(openMux)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", h.static())
@@ -43,6 +45,7 @@ func (h *Web) Handlers() (app, open http.Handler, err error) {
 	mux.HandleFunc("GET /new", h.newNote)
 	mux.HandleFunc("GET /settings", h.settings)
 	mux.HandleFunc("POST /settings", h.saveSettings)
+	mux.HandleFunc("POST /settings/feed-token", h.rotateFeed)
 	mux.HandleFunc("POST /collections", h.createCollection)
 	mux.HandleFunc("POST /collections/{id}/{action}", h.collectionAction)
 	mux.HandleFunc("GET /notes/{pid}", h.note)

@@ -57,7 +57,7 @@ func run(log *slog.Logger) error {
 	svc := core.New(db, fs, nil)
 	go svc.RunReaper(ctx, 30*time.Second, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
 
-	app, open, err := (&web.Web{Svc: svc, Log: log, Version: version}).Handlers()
+	app, open, err := (&web.Web{Svc: svc, Log: log, Version: version, Origin: cfg.PublicOrigin}).Handlers()
 	if err != nil {
 		return err
 	}

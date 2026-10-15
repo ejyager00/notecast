@@ -45,6 +45,13 @@ type view struct {
 	Settings      core.Settings
 	Worker        workerStatus
 	Pending       int
+	Feeds         []feedLink
+}
+
+type feedLink struct {
+	ID   string
+	Name string
+	URL  string
 }
 
 type workerStatus struct {
@@ -404,6 +411,13 @@ func (h *Web) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Title = "Settings"
 	v.Flash = r.URL.Query().Get("msg")
+	if tok := v.Settings.FeedToken; tok != "" {
+		base := h.Origin + "/feed/" + tok
+		v.Feeds = append(v.Feeds, feedLink{"all", "All notes", base + "/all.xml"})
+		for _, c := range v.Collections {
+			v.Feeds = append(v.Feeds, feedLink{strconv.FormatInt(c.ID, 10), c.Name, fmt.Sprintf("%s/c/%d.xml", base, c.ID)})
+		}
+	}
 	h.render(w, r, http.StatusOK, "settings", "layout", v)
 }
 

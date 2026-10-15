@@ -33,3 +33,5 @@ def icon(size: int) -> Image.Image:
 
 for size in (180, 512):
     icon(size).save(f"internal/web/static/icon-{size}.png", optimize=True)
+# Podcast cover art: Apple wants 1400-3000 px square.
+icon(1400).save("internal/web/static/art-1400.png", optimize=True)

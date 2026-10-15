@@ -89,3 +89,19 @@ function setupPlayer(root) {
 
 document.querySelectorAll(".player").forEach(setupPlayer);
 document.addEventListener("htmx:load", (e) => e.detail.elt.querySelectorAll?.(".player").forEach(setupPlayer));
+
+// --- copy buttons (feed links) ---
+document.addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-copy]");
+  if (!b) return;
+  const input = document.getElementById(b.dataset.copy);
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch (_) {
+    input.select(); // fallback: select it so a long-press copy works
+    return;
+  }
+  const label = b.textContent;
+  b.textContent = "Copied";
+  setTimeout(() => { b.textContent = label; }, 1500);
+});

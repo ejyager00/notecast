@@ -50,6 +50,26 @@
   <button type="submit">Add</button>
 </form>
 
-<h2>Podcast feed</h2>
-<p class="muted small">Coming soon: subscribe in your podcast app and new notes arrive automatically.</p>
+<h2 id="feed">Podcast feed</h2>
+<p class="muted small">Subscribe in a podcast app and new audio arrives on its own, with speed control and offline listening. Each collection is its own show.</p>
+{{if .Feeds}}
+{{range .Feeds}}
+<label for="feed-{{.ID}}">{{.Name}}</label>
+<div class="row">
+  <input class="grow" id="feed-{{.ID}}" type="text" value="{{.URL}}" readonly>
+  <button type="button" data-copy="feed-{{.ID}}">Copy</button>
+</div>
+{{end}}
+<details><summary>Add it to Apple Podcasts</summary>
+  <ol class="small">
+    <li>Copy a feed link above.</li>
+    <li>Open <strong>Podcasts</strong>, go to <strong>Library</strong>, tap <strong>⋯</strong> (top right), then <strong>Follow a Show by URL</strong>.</li>
+    <li>Paste the link and tap <strong>Follow</strong>.</li>
+  </ol>
+</details>
+<p class="muted small">Anyone with a feed link can listen. If one gets out, make a new link; the old ones stop working and you’ll need to re-add the feed.</p>
+<form method="post" action="/settings/feed-token"><button class="danger" type="submit">Make new feed links</button></form>
+{{else}}
+<form method="post" action="/settings/feed-token"><button class="primary" type="submit">Create feed link</button></form>
+{{end}}
 {{end}}

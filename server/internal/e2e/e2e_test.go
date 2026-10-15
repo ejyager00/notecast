@@ -72,7 +72,7 @@ func setup(t *testing.T) *env {
 	svc := core.New(db, fs, clk.Now)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	app, open, err := (&web.Web{Svc: svc, Log: log, Version: "test"}).Handlers()
+	app, open, err := (&web.Web{Svc: svc, Log: log, Version: "test", Origin: origin}).Handlers()
 	if err != nil {
 		t.Fatal(err)
 	}
