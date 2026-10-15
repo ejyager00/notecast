@@ -70,7 +70,7 @@
 {{define "review-form"}}{{$n := .Note}}
 <form method="post" action="/notes/{{$n.PID}}/edit">
   <label for="title">Title</label>
-  <input id="title" type="text" name="title" value="{{$n.Title}}" maxlength="200">
+  <input id="title" type="text" name="title" value="{{$n.Title}}" maxlength="200">{{seen "title" $n.Title}}
 
   <label for="coll">Collection</label>
   <select id="coll" name="collection_id">
@@ -86,12 +86,14 @@
     {{with flags (deref $p.Transcript)}}<p class="flags">Check: {{range .}}<span>{{.}}</span>{{end}}</p>{{end}}
     <label for="t{{$p.ID}}">Page {{add $i 1}}{{if not $n.Legacy}}, as written{{end}}</label>
     <textarea class="transcript" id="t{{$p.ID}}" name="transcript-{{$p.ID}}" spellcheck="false">{{deref $p.Transcript}}</textarea>
+    {{seen (printf "transcript-%d" $p.ID) $p.Transcript}}
     {{if not $n.Legacy}}
     <label for="n{{$p.ID}}">Page {{add $i 1}}, read aloud</label>
     {{if $p.NarrationStale}}<p class="banner warn small">You changed this page after its narration was written.</p>
     {{else if not $p.Narration}}<p class="muted small">Not narrated yet. Rewrite narration fills this in.</p>
     {{else if $p.NarrationEdited}}<p class="muted small">Your edit. Rewriting leaves it alone unless the page changes; empty it to have it rewritten.</p>{{end}}
     <textarea id="n{{$p.ID}}" name="narration-{{$p.ID}}" aria-label="Page {{add $i 1}} narration" rows="8">{{deref $p.Narration}}</textarea>
+    {{seen (printf "narration-%d" $p.ID) $p.Narration}}
     {{end}}
   </div>
   {{end}}{{end}}
@@ -100,7 +102,7 @@
   <h2>Narration</h2>
   {{if $n.NarrationStale}}<div class="banner warn">You changed the transcript after this narration was written. Rewrite it so the audio matches.</div>{{end}}
   <p class="muted small">This is what will be read aloud. A line starting with <code>## </code> starts a new chapter. It was written for the whole note at once; rewrite it to get one you can fix page by page.</p>
-  <textarea id="narration" name="narration" aria-label="Narration" rows="14">{{$n.Narration}}</textarea>
+  <textarea id="narration" name="narration" aria-label="Narration" rows="14">{{$n.Narration}}</textarea>{{seen "narration" $n.Narration}}
   {{else if $n.NarrationStale}}
   <div class="banner warn">Some pages changed after their narration was written, or haven’t been narrated yet. Rewriting redoes just those pages.</div>
   {{end}}

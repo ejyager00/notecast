@@ -312,5 +312,8 @@ and anything the next session needs to know._
   OpenRouter for both stages (docs/changelog.md). Evaluated and switched:
   OCR Qwen3.8 27B at 2048 px, narration GLM 5.3 Flash (reasoning low);
   `eval/ocr_bench.py --provider` benches hosted models. Local model kept as
-  fallback. Next: watch the first real note's
+  fallback. Fixed a lost update: a review form opened before a change could
+  save its stale copy over it; saves now skip untouched fields (fingerprints)
+  and refuse fields changed on both sides. Worker now runs detached
+  (`~/.local/state/notecast/worker.log`). Next: watch the first real note's
   cost and quality; Phase 7 Shepherd service for the worker.

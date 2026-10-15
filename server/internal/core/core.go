@@ -6,7 +6,9 @@ package core
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -438,6 +440,44 @@ type Edits struct {
 	Narration    *string          // legacy notes only (see Note.Legacy)
 	Voice        *string
 	Speed        *float64
+	// Seen holds the Fingerprint of each text field as the form showed it,
+	// keyed by field name ("title", "narration", "transcript-<page id>",
+	// "narration-<page id>"). See Edits.apply.
+	Seen map[string]string
+}
+
+// Fingerprint identifies the value a form field was rendered with.
+func Fingerprint(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:8])
+}
+
+// apply decides whether a submitted field gets written. With no fingerprint
+// it is written whenever it differs. With one, a field she left as shown is
+// skipped, so a form opened earlier can't undo a change made since (by the
+// worker, another tab, or a fix made for her); a field changed on both sides
+// is refused.
+func (e Edits) apply(key, what, submitted, current string) (bool, error) {
+	if submitted == current {
+		return false, nil
+	}
+	seen, ok := e.Seen[key]
+	switch {
+	case !ok || Fingerprint(current) == seen:
+		return true, nil
+	case Fingerprint(submitted) == seen:
+		return false, nil
+	}
+	return false, fmt.Errorf("%w: %s was changed somewhere else after you opened this note, so nothing was saved. "+
+		"Reload and make your change again", ErrConflict, what)
+}
+
+// applyPtr is Edits.apply for an optional field.
+func applyPtr(e Edits, key, what string, submitted *string, current string) (bool, error) {
+	if submitted == nil {
+		return false, nil
+	}
+	return e.apply(key, what, *submitted, current)
 }
 
 func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
@@ -451,7 +491,9 @@ func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
 		}
 		now := store.Now(s.now())
 		contentChanged := false
-		if e.Title != nil {
+		if write, err := applyPtr(e, "title", "the title", e.Title, n.Title); err != nil {
+			return err
+		} else if write {
 			if _, err := tx.ExecContext(ctx, `UPDATE notes SET title = ?, updated_at = ? WHERE id = ?`, *e.Title, now, n.ID); err != nil {
 				return err
 			}
@@ -480,15 +522,19 @@ func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
 		}
 		transcriptChanged := false
 		for pageID, text := range e.Transcripts {
-			var cur sql.NullString
-			if err := tx.QueryRowContext(ctx, `SELECT transcript FROM pages WHERE id = ? AND note_id = ?`, pageID, n.ID).Scan(&cur); err != nil {
+			i := slices.IndexFunc(n.Pages, func(p Page) bool { return p.ID == pageID })
+			if i < 0 {
 				return fmt.Errorf("%w: page %d is not part of this note", ErrInvalid, pageID)
 			}
-			if cur.Valid && cur.String == text {
-				continue
-			}
-			if !cur.Valid {
+			p := n.Pages[i]
+			if p.Transcript == nil {
 				return fmt.Errorf("%w: page %d hasn't been transcribed yet", ErrConflict, pageID)
+			}
+			what := fmt.Sprintf("page %d's text", p.Position)
+			if write, err := e.apply(fmt.Sprintf("transcript-%d", pageID), what, text, *p.Transcript); err != nil {
+				return err
+			} else if !write {
+				continue
 			}
 			// The page's narration (if any) now describes an older transcript.
 			if _, err := tx.ExecContext(ctx, `UPDATE pages SET transcript = ?,
@@ -512,7 +558,15 @@ func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
 			if i < 0 {
 				return fmt.Errorf("%w: page %d is not part of this note", ErrInvalid, pageID)
 			}
-			if cur := n.Pages[i].Narration; (cur == nil && text == "") || (cur != nil && *cur == text) {
+			p := n.Pages[i]
+			cur := ""
+			if p.Narration != nil {
+				cur = *p.Narration
+			}
+			what := fmt.Sprintf("page %d's narration", p.Position)
+			if write, err := e.apply(fmt.Sprintf("narration-%d", pageID), what, text, cur); err != nil {
+				return err
+			} else if !write {
 				continue
 			}
 			var nar any = text
@@ -526,7 +580,9 @@ func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
 			}
 			contentChanged = true
 		}
-		if e.Narration != nil && *e.Narration != n.Narration {
+		if write, err := applyPtr(e, "narration", "the narration", e.Narration, n.Narration); err != nil {
+			return err
+		} else if write {
 			if !n.Legacy() {
 				return fmt.Errorf("%w: edit the narration page by page", ErrInvalid)
 			}

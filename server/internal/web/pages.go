@@ -88,6 +88,20 @@ var flagRe = regexp.MustCompile(`\[\?([^\]\n]{1,60})\]|\[illegible\]`)
 
 var funcs = template.FuncMap{
 	"add": func(a, b int) int { return a + b },
+	// seen is the hidden field that lets a save skip what she didn't change.
+	"seen": func(field string, value any) template.HTML {
+		var s string
+		switch v := value.(type) {
+		case string:
+			s = v
+		case *string:
+			if v != nil {
+				s = *v
+			}
+		}
+		return template.HTML(`<input type="hidden" name="seen-` + template.HTMLEscapeString(field) +
+			`" value="` + core.Fingerprint(s) + `">`)
+	},
 	"deref": func(v any) any {
 		rv := reflect.ValueOf(v)
 		if rv.Kind() != reflect.Pointer {

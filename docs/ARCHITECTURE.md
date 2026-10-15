@@ -197,6 +197,13 @@ The worker caches each page's narration under `~/.cache/notecast/narration`,
 keyed by model, prompt, context and transcript, so a retry resumes at the page
 that failed.
 
+The review form submits every text field on every button. Each field carries
+a fingerprint of the value it was shown with (`seen-<field>`,
+`core.Edits.Seen`), so a save skips fields she didn't change. A form left open
+in another tab, or from before the worker or a fix changed a page, can't undo
+that change. If a field changed on both sides, nothing is saved and she is
+asked to reload.
+
 Rules the prompts enforce:
 
 - **Faithful.** Never add facts, examples or explanations that aren't in the

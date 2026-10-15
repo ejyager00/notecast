@@ -214,7 +214,8 @@ func (h *Web) noteAction(w http.ResponseWriter, r *http.Request) {
 
 // edit saves the review form. Fields absent from the form are unchanged;
 // transcripts and narrations arrive as transcript-<page id> and
-// narration-<page id>.
+// narration-<page id>, and seen-<field> carries the fingerprint of what the
+// form showed (core.Edits.Seen).
 func (h *Web) edit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -249,6 +250,13 @@ func (h *Web) edit(w http.ResponseWriter, r *http.Request) {
 		e.Speed = &f // 0 = use the default
 	}
 	for k, v := range r.PostForm {
+		if field, ok := strings.CutPrefix(k, "seen-"); ok {
+			if e.Seen == nil {
+				e.Seen = map[string]string{}
+			}
+			e.Seen[field] = v[0]
+			continue
+		}
 		for prefix, dst := range map[string]*map[int64]string{
 			"transcript-": &e.Transcripts, "narration-": &e.Narrations,
 		} {
