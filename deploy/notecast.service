@@ -15,8 +15,8 @@ Environment=DATA_DIR=/mnt/data/volumes/notecast
 Environment=PUBLIC_BIND=100.97.104.119:8790
 Environment=WORKER_BIND=100.97.104.119:8791
 Environment=PUBLIC_ORIGIN=https://notecast.yager.me
-Environment=CF_ACCESS_TEAM_DOMAIN=REPLACE-ME.cloudflareaccess.com
-Environment=CF_ACCESS_AUD=REPLACE-ME
+Environment=CF_ACCESS_TEAM_DOMAIN=green-sun-8584.cloudflareaccess.com
+Environment=CF_ACCESS_AUD=62b1ae53b42dd16d9ddf1b12dd9c8b8c0c28e84f6db33ab2f89d03b09569c29f
 Environment=NOTIFY_CMD=/home/eric/.config/containers/systemd/notify.sh
 # ALLOWED_EMAILS and WORKER_TOKEN_SHA256 live outside git: one holds her
 # address, and keeping both together keeps the unit generic.
