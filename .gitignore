@@ -1,0 +1,13 @@
+# Her notes, eval runs and model weights never live in the repo.
+/eval-data/
+*.gguf
+*.onnx
+*.mp3
+*.wav
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+/server/notecast
+/dist/
+*.zip
+/.dev-data/
