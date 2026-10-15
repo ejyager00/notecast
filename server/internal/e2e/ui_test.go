@@ -52,7 +52,7 @@ func TestPagesThroughLifecycle(t *testing.T) {
 	}
 	e.page("/", "No notes yet", `href="/new"`)
 	e.page("/new", "Next: add pages")
-	e.page("/settings", "Never connected", "Heart (US, female)")
+	e.page("/settings", "Never connected", "Heart (US, female)", `data-sample-voice="dv"`, `data-default-voice="af_heart"`)
 	e.page("/static/htmx.min.js", "htmx")
 	if r, _ := e.get("/static/"); r.StatusCode != http.StatusNotFound {
 		t.Fatalf("static directory listing: %d", r.StatusCode)

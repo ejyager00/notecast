@@ -3,6 +3,8 @@
 *.gguf
 *.onnx
 *.mp3
+# Voice samples read a fixed generic sentence (worker/scripts/voice_samples.py).
+!/server/internal/web/static/voices/*.mp3
 *.wav
 __pycache__/
 .pytest_cache/
