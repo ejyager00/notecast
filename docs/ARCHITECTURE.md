@@ -76,13 +76,13 @@ Trust boundaries:
 
 ## 2. Domain model
 
-**Note**: one study note, made of one or more pages, with one narration and at
-most one current audio file. A note belongs to zero or one **Collection**
+**Note**: one study note, made of one or more pages, with one narration (the
+pages' narrations joined in order) and at most one current audio file. A note belongs to zero or one **Collection**
 (e.g. a class or subject; she creates these). **Tags** are free-form and
 suggested by the narration stage.
 
-**Page**: one uploaded photo plus its per-page transcript. Pages are ordered
-within a note.
+**Page**: one uploaded photo plus its per-page transcript and per-page
+narration (§3.3). Pages are ordered within a note.
 
 **Job**: one unit of worker execution against a note. A note has **at most one
 active job** (enforced by a partial unique index, §4.4), which removes all
@@ -110,17 +110,18 @@ any active ── fails max_attempts ──▶ failed(failed_stage) ── retry
 - Editing a `ready` note moves it to `review`. **The old audio stays live in the
   player and the feed until new audio replaces it.**
 - Adding pages to a note in `review`/`ready` enqueues `transcribe` for only the
-  pages with no transcript. Narration is then regenerated from the whole note.
-- `narration_stale` is set when the transcript is edited after narration was
-  generated. The review screen then pushes "Rewrite narration from transcript"
-  instead of letting a stale narration be approved silently.
+  pages with no transcript, and only those pages are narrated.
+- `pages.narration_stale` is set when a page's transcript is edited after its
+  narration was written; `notes.narration_stale` is true while any read page
+  is stale or un-narrated. The review screen then pushes "Rewrite changed
+  pages" instead of letting a stale narration be approved silently.
 
 ### 2.2 Job kinds
 
 | Kind | Input | Output | Needs GPU |
 |---|---|---|---|
-| `transcribe` | page images (by page id) | normalized display JPEG + thumbnail per page, per-page transcript, **plus** a narration draft and title/summary/tags | yes (local) |
-| `narrate` | full transcript | narration + title/summary/tags | yes (local) |
+| `transcribe` | page images (by page id) | normalized display JPEG + thumbnail per page, per-page transcript, **plus** narration for the pages read (and any stale ones), and title/summary/tags | yes (local) |
+| `narrate` | every page's transcript and narration, the ones to redo marked | narration for the marked pages; title/summary/tags if asked | yes (local) |
 | `speak` | narration, voice, speed | MP3, duration, chapter list | no (CPU) |
 
 `transcribe` chains OCR and narration in a single job because the same model is
@@ -161,32 +162,64 @@ Pages are independent, which keeps retries cheap and errors local.
 
 ### 3.3 Narration stage (text model)
 
-Prompt file: `worker/prompts/narrate.v1.md`. The input is the full transcript
-in page order. The output is constrained JSON (llama-server supports
-`response_format` with a JSON schema; cloud providers do too):
+Narration is written **one page at a time** (prompt files
+`worker/prompts/narrate-page.v1.md`, and `narrate-quiz-page.v1.md` for the quiz
+style). Each call gets one page's transcript plus the last paragraph of the
+narration so far (`pipeline.CONTEXT_CHARS`), so it carries on without a seam.
+The output is constrained JSON (llama-server supports `response_format` with a
+JSON schema; cloud providers do too): `{"narration": "..."}`. A separate call
+over the whole transcript (`meta.v1.md`) writes `{"title", "summary", "tags"}`.
 
-```json
-{"title": "...", "summary": "1–2 sentences", "tags": ["..."],
- "narration": "## Section heading\nSpoken prose...\n\n## Next section\n..."}
-```
+Why per page, not the whole note in one call (measured 2026-10-15 on an 8-page
+note, qwen3-vl-8b on the CPU):
 
-Rules the prompt enforces:
+- **Rewrites are cheap.** Only pages whose transcript changed are redone: about
+  2 minutes a page against 17 for the whole note. An added page is narrated on
+  its own.
+- **Nothing gets dropped.** Writing ~1,700 tokens in one go, the model
+  compressed and skipped facts (2 of ~150 lines lost); per page it stayed
+  complete.
+- **Her edits survive.** A page whose narration she edited is hers
+  (`pages.narration_edited`) and a rewrite of unchanged pages leaves it alone.
+  Emptying the box hands it back.
+- No ceiling on note length from the context window or output limit.
+
+The cost is the first narration, which takes the same time, and possible seams
+when a passage runs across a page break. Her notes are mostly one fact a line,
+so it hasn't shown.
+
+Which pages a job narrates is the server's call (`core.narrateIDs`): pages
+being read, never-narrated pages, and stale pages. "Rewrite narration" with
+nothing stale redoes every page she hasn't edited. Title, summary and tags are
+regenerated (`core.wantMeta`) when the note is new, gains pages, or every page
+is being redone; a fix to one page keeps them. A title she typed always wins.
+The worker caches each page's narration under `~/.cache/notecast/narration`,
+keyed by model, prompt, context and transcript, so a retry resumes at the page
+that failed.
+
+Rules the prompts enforce:
 
 - **Faithful.** Never add facts, examples or explanations that aren't in the
   notes. It rephrases for the ear and does not teach.
 - Turn bullets into sentences with light transitions. Read headings as section
   introductions. Turn arrows and relationships into words ("which leads to").
-- Expand abbreviations only when unambiguous in context, and otherwise leave
-  them as written. Spell out symbols, units and simple math so they read
-  naturally ("x squared", "approximately").
+- Say abbreviations as she would aloud: expand the field's standard ones when
+  unambiguous (DIC, LMWH), otherwise leave them as written. Fix obvious
+  misspellings of well-known terms, never what a line says. Spell out symbols,
+  units and simple math so they read naturally ("x squared", "approximately").
 - Drop `[?word]` markers but keep the best-guess word. For `[illegible]`, either
   skip it or say "one word unreadable", whichever the setting asks for. For
   diagrams: "There's a diagram here showing …".
+- Don't introduce pages, recap, or wrap up; the pieces are joined.
 - `## ` lines split sections, which become audio chapters (§3.5).
 
-`narration` is stored and edited as **plain text with `## ` headings**, a
-format that's easy to edit in one textarea on a phone. Section boundaries are
+Each page's narration is stored and edited as **plain text with `## `
+headings**, in its own textarea under the page. `notes.narration` is the pages'
+narrations joined with blank lines (`core.syncNarration`), rebuilt on every
+change, and is what `speak`, search and the feed read. Section boundaries are
 recomputed from it at `speak` time, so editing can't desync the structure.
+Notes narrated before migration 0002 have only `notes.narration` and show it
+as one box until their first rewrite.
 
 ### 3.4 Provider seam
 
@@ -221,9 +254,17 @@ Every result records `{provider, model, prompt_version}` in
 `notes.provenance`, so a note can be re-run later and compared against a
 different model.
 
+OpenRouter is a `kind = "openai"` provider. Its routing preferences go in
+`extra_body`: `provider = { data_collection = "deny", require_parameters = true }`
+keeps her notes away from providers that train on or keep prompts, and from any
+that would ignore the JSON schema. Reasoning models spend output tokens
+thinking before they answer; `min_max_tokens` raises every request's
+`max_tokens` to cover that. Use the plain model slug, never `:batch`: batch
+variants are only for the asynchronous Batch API, which may take 24 hours.
+
 Privacy is a config decision, not a code path. **Switching a stage to `cloud`
 sends her notes to that provider.** Don't do that without her agreement, and
-record it in `docs/changelog` if it happens.
+record it in `docs/changelog.md` if it happens.
 
 ### 3.5 Speech stage (TTS)
 
@@ -338,6 +379,9 @@ CREATE TABLE pages (
   orig_ext TEXT NOT NULL, orig_sha256 TEXT NOT NULL, orig_bytes INTEGER NOT NULL,
   has_display INTEGER NOT NULL DEFAULT 0,
   transcript TEXT,
+  narration TEXT,                                -- 0002; NULL = never narrated
+  narration_stale INTEGER NOT NULL DEFAULT 0,    -- transcript changed since
+  narration_edited INTEGER NOT NULL DEFAULT 0,   -- she wrote it, not the model
   UNIQUE (note_id, position));
 
 CREATE TABLE jobs (
@@ -384,7 +428,7 @@ order.
 | `POST /notes/{pid}/pages` | **One page per request**, so each photo uploads with its own progress and failure on cellular. `http.MaxBytesReader` at 25 MB; magic-byte sniff; streamed to `tmp/` then renamed |
 | `POST /notes/{pid}/pages/{id}/move`, `DELETE …` | Reorder (up/down buttons) and remove |
 | `POST /notes/{pid}/submit` | `uploading → transcribing` |
-| `GET /notes/{pid}` | Note page. **Review mode**: each page image stacked above its editable transcript, `[?…]` highlighted, then the narration textarea, Save / Rewrite narration / Approve. **Ready mode**: player, speed buttons (1×, 1.25×, 1.5×, 2×), Download, Edit |
+| `GET /notes/{pid}` | Note page. **Review mode**: each page image stacked above its editable transcript, `[?…]` highlighted, and that page's narration textarea, then Save / Rewrite narration / Approve. **Ready mode**: player, speed buttons (1×, 1.25×, 1.5×, 2×), Download, Edit |
 | `GET /notes/{pid}/status` | htmx partial polled `every 5s` only while a job is active; it stops itself by returning a version without `hx-trigger` once the note reaches a terminal state |
 | `POST /notes/{pid}/{approve,rewrite,retry,cancel}` | Status transitions (§2.1) |
 | `GET /notes/{pid}/audio` | `http.ServeContent`: Range + HEAD support, **which iOS requires for audio**. `?download=1` adds `Content-Disposition: attachment; filename="<title>.mp3"` |
@@ -518,7 +562,8 @@ worker/notecast_worker/
   llama.py       managed llama-server lifecycle + GPU guard (§6.3)
   tts.py         SpeechEngine protocol + KokoroEngine
   audio.py       silence, concat, ffmpeg encode, loudnorm, ID3 chapters
-  prompts/       ocr.v1.md, narrate.v1.md (versioned; version recorded in provenance)
+  prompts/       ocr.v1.md, narrate-page.v1.md, narrate-quiz-page.v1.md, meta.v1.md
+                 (versioned; version recorded in provenance)
   config.py      worker.toml loader
 ```
 

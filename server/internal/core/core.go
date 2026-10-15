@@ -13,6 +13,7 @@ import (
 	"io"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"git.ericbits.win/eric/notecast/server/internal/files"
@@ -81,6 +82,17 @@ type Page struct {
 	Bytes      int64
 	HasDisplay bool
 	Transcript *string
+	// The page's part of the script (nil = never narrated), whether its
+	// transcript changed since, and whether she wrote it rather than the model.
+	Narration       *string
+	NarrationStale  bool
+	NarrationEdited bool
+}
+
+// NeedsNarration: the page has been read but has no narration, or its
+// narration was written from an older transcript.
+func (p Page) NeedsNarration() bool {
+	return p.Transcript != nil && (p.Narration == nil || p.NarrationStale)
 }
 
 type Chapter struct {
@@ -125,6 +137,15 @@ func (n *Note) Previews() int {
 	}
 	return c
 }
+
+// Segmented reports whether the note's narration is kept per page. Notes
+// narrated before migration 0002 aren't until they're rewritten (Legacy).
+func (n *Note) Segmented() bool {
+	return slices.ContainsFunc(n.Pages, func(p Page) bool { return p.Narration != nil })
+}
+
+// Legacy is a note with one narration for the whole note and none per page.
+func (n *Note) Legacy() bool { return n.Narration != "" && !n.Segmented() }
 
 // Transcript is the note's pages joined in order, as the narrator sees it.
 func (n *Note) Transcript() string {
@@ -193,23 +214,28 @@ func loadNote(ctx context.Context, tx *sql.Tx, pid string) (*Note, error) {
 	n.CreatedAt, _ = store.ParseTime(created)
 	n.UpdatedAt, _ = store.ParseTime(updated)
 
-	rows, err := tx.QueryContext(ctx, `SELECT id, position, orig_ext, orig_sha256, orig_bytes, has_display, transcript
-		FROM pages WHERE note_id = ? ORDER BY position`, n.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT id, position, orig_ext, orig_sha256, orig_bytes, has_display, transcript,
+		narration, narration_stale, narration_edited FROM pages WHERE note_id = ? ORDER BY position`, n.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p Page
-		var hasDisplay int
-		var tr sql.NullString
-		if err := rows.Scan(&p.ID, &p.Position, &p.Ext, &p.SHA256, &p.Bytes, &hasDisplay, &tr); err != nil {
+		var hasDisplay, stale, edited int
+		var tr, nar sql.NullString
+		if err := rows.Scan(&p.ID, &p.Position, &p.Ext, &p.SHA256, &p.Bytes, &hasDisplay, &tr,
+			&nar, &stale, &edited); err != nil {
 			return nil, err
 		}
 		p.HasDisplay = hasDisplay != 0
 		if tr.Valid {
 			p.Transcript = &tr.String
 		}
+		if nar.Valid {
+			p.Narration = &nar.String
+		}
+		p.NarrationStale, p.NarrationEdited = stale != 0, edited != 0
 		n.Pages = append(n.Pages, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -320,12 +346,34 @@ func (s *Service) TranscribeNew(ctx context.Context, pid string) error {
 	return s.event(ctx, pid, notes.TranscribeNew, nil)
 }
 
+// Rewrite queues narration of the pages that need it: those whose
+// transcript changed, or that were never narrated. If none do, it rewrites
+// every page she hasn't edited by hand (or every page, if she edited them all).
 func (s *Service) Rewrite(ctx context.Context, pid string) error {
-	return s.event(ctx, pid, notes.Rewrite, func(n *Note) error {
+	return s.inTx(ctx, func(tx *sql.Tx, enq *bool) error {
+		n, err := loadNote(ctx, tx, pid)
+		if err != nil {
+			return err
+		}
 		if n.Transcript() == "" {
 			return fmt.Errorf("%w: nothing transcribed yet", ErrConflict)
 		}
-		return nil
+		if n.Segmented() && !slices.ContainsFunc(n.Pages, Page.NeedsNarration) {
+			for _, cond := range []string{"narration_edited = 0", "1"} {
+				res, err := tx.ExecContext(ctx, `UPDATE pages SET narration_stale = 1
+					WHERE note_id = ? AND transcript IS NOT NULL AND `+cond, n.ID)
+				if err != nil {
+					return err
+				}
+				if c, _ := res.RowsAffected(); c > 0 {
+					break
+				}
+			}
+			if err := syncNarration(ctx, tx, n.ID); err != nil {
+				return err
+			}
+		}
+		return s.transition(ctx, tx, n, notes.Rewrite, "", enq)
 	})
 }
 
@@ -386,7 +434,8 @@ type Edits struct {
 	Title        *string
 	CollectionID **int64 // set to a nil *int64 to clear
 	Transcripts  map[int64]string
-	Narration    *string
+	Narrations   map[int64]string // per page; "" clears it, so the next rewrite redoes it
+	Narration    *string          // legacy notes only (see Note.Legacy)
 	Voice        *string
 	Speed        *float64
 }
@@ -441,24 +490,53 @@ func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
 			if !cur.Valid {
 				return fmt.Errorf("%w: page %d hasn't been transcribed yet", ErrConflict, pageID)
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE pages SET transcript = ? WHERE id = ?`, text, pageID); err != nil {
+			// The page's narration (if any) now describes an older transcript.
+			if _, err := tx.ExecContext(ctx, `UPDATE pages SET transcript = ?,
+				narration_stale = (narration IS NOT NULL) WHERE id = ?`, text, pageID); err != nil {
 				return err
 			}
 			transcriptChanged = true
 		}
 		if transcriptChanged {
 			contentChanged = true
-			if n.Narration != "" {
+			if n.Legacy() {
 				if _, err := tx.ExecContext(ctx, `UPDATE notes SET narration_stale = 1 WHERE id = ?`, n.ID); err != nil {
 					return err
 				}
 			}
 		}
+		// A narration she edits is hers: it's no longer stale, and a rewrite
+		// of unchanged pages leaves it alone. Clearing it hands it back.
+		for pageID, text := range e.Narrations {
+			i := slices.IndexFunc(n.Pages, func(p Page) bool { return p.ID == pageID })
+			if i < 0 {
+				return fmt.Errorf("%w: page %d is not part of this note", ErrInvalid, pageID)
+			}
+			if cur := n.Pages[i].Narration; (cur == nil && text == "") || (cur != nil && *cur == text) {
+				continue
+			}
+			var nar any = text
+			edited := 1
+			if strings.TrimSpace(text) == "" {
+				nar, edited = nil, 0
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE pages SET narration = ?, narration_stale = 0,
+				narration_edited = ? WHERE id = ?`, nar, edited, pageID); err != nil {
+				return err
+			}
+			contentChanged = true
+		}
 		if e.Narration != nil && *e.Narration != n.Narration {
+			if !n.Legacy() {
+				return fmt.Errorf("%w: edit the narration page by page", ErrInvalid)
+			}
 			contentChanged = true
 			if _, err := tx.ExecContext(ctx, `UPDATE notes SET narration = ? WHERE id = ?`, *e.Narration, n.ID); err != nil {
 				return err
 			}
+		}
+		if err := syncNarration(ctx, tx, n.ID); err != nil {
+			return err
 		}
 		// Content edits on a ready note send it back to review (its audio stays
 		// live until replaced). Title, collection, voice and speed don't.
@@ -557,10 +635,13 @@ func (s *Service) DeletePage(ctx context.Context, pid string, pageID int64) erro
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pages WHERE id = ?`, pageID); err != nil {
 			return err
 		}
-		if transcribed && n.Narration != "" {
+		if transcribed && n.Legacy() {
 			if _, err := tx.ExecContext(ctx, `UPDATE notes SET narration_stale = 1 WHERE id = ?`, n.ID); err != nil {
 				return err
 			}
+		}
+		if err := syncNarration(ctx, tx, n.ID); err != nil { // drops the page's part
+			return err
 		}
 		return upsertFTS(ctx, tx, pid)
 	})
@@ -597,10 +678,13 @@ func (s *Service) MovePage(ctx context.Context, pid string, pageID int64, delta 
 				return err
 			}
 		}
-		if a.Transcript != nil && b.Transcript != nil && n.Narration != "" {
+		if a.Transcript != nil && b.Transcript != nil && n.Legacy() {
 			if _, err := tx.ExecContext(ctx, `UPDATE notes SET narration_stale = 1 WHERE id = ?`, n.ID); err != nil {
 				return err
 			}
+		}
+		if err := syncNarration(ctx, tx, n.ID); err != nil { // the parts follow their pages
+			return err
 		}
 		return upsertFTS(ctx, tx, pid)
 	})
@@ -740,6 +824,41 @@ func (s *Service) PendingJobs(ctx context.Context) (int, error) {
 }
 
 // --- helpers -------------------------------------------------------------------
+
+// syncNarration rebuilds notes.narration from the page narrations, in page
+// order, and notes.narration_stale from whether any read page needs
+// narrating. Legacy and never-narrated notes are left as they are.
+func syncNarration(ctx context.Context, tx *sql.Tx, noteID int64) error {
+	rows, err := tx.QueryContext(ctx, `SELECT narration, transcript IS NOT NULL, narration_stale
+		FROM pages WHERE note_id = ? ORDER BY position`, noteID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var parts []string
+	segmented, stale := false, false
+	for rows.Next() {
+		var nar sql.NullString
+		var read, st bool
+		if err := rows.Scan(&nar, &read, &st); err != nil {
+			return err
+		}
+		segmented = segmented || nar.Valid
+		stale = stale || (read && (!nar.Valid || st))
+		if t := strings.TrimSpace(nar.String); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !segmented {
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE notes SET narration = ?, narration_stale = ? WHERE id = ?`,
+		strings.Join(parts, "\n\n"), stale, noteID)
+	return err
+}
 
 func nullable(s string) any {
 	if s == "" {

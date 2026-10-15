@@ -49,6 +49,9 @@ class OpenAIChat:
     timeout: float = 600.0
     # Merged into every request body, e.g. {"chat_template_kwargs": {...}}.
     extra_body: dict[str, Any] = field(default_factory=dict)
+    # Raise every request's max_tokens to at least this. Reasoning models
+    # (GLM 5.3 can't turn thinking off) spend output tokens before answering.
+    min_max_tokens: int = 0
 
     @classmethod
     def from_config(cls, name: str, cfg: dict[str, Any]) -> OpenAIChat:
@@ -62,6 +65,7 @@ class OpenAIChat:
             api_key=key,
             timeout=float(cfg.get("timeout", 600)),
             extra_body=dict(cfg.get("extra_body", {})),
+            min_max_tokens=int(cfg.get("min_max_tokens", 0)),
         )
 
     def complete(
@@ -85,7 +89,7 @@ class OpenAIChat:
                 {"role": "user", "content": content},
             ],
             "temperature": 0,
-            "max_tokens": max_tokens,
+            "max_tokens": max(max_tokens, self.min_max_tokens),
         }
         if json_schema is not None:
             body["response_format"] = {
@@ -104,7 +108,7 @@ class OpenAIChat:
         dt = time.monotonic() - t0
         choice = data["choices"][0]
         if choice.get("finish_reason") == "length":
-            raise RuntimeError(f"{self.name}: output truncated at max_tokens={max_tokens}")
+            raise RuntimeError(f"{self.name}: output truncated at max_tokens={body['max_tokens']}")
         usage = data.get("usage") or {}
         return ChatResult(
             text=choice["message"]["content"] or "",

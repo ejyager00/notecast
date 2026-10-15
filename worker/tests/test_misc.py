@@ -6,7 +6,7 @@ from PIL import Image
 
 from notecast_worker import images
 from notecast_worker.llm import parse_json
-from notecast_worker.pipeline import join_pages, prompt
+from notecast_worker.pipeline import META_PROMPT, NARRATE_PROMPTS, join_pages, prompt, tail
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "eval"))
 from metrics import cer, normalize, wer
@@ -19,9 +19,17 @@ def test_parse_json_tolerates_fence():
 
 def test_prompts_load():
     assert "verbatim" in prompt("ocr.v1")
-    assert "{illegible_instruction}" in prompt("narrate.v1")
-    assert "{illegible_instruction}" in prompt("narrate-quiz.v1")
-    assert "[pause]" in prompt("narrate-quiz.v1")
+    for name in NARRATE_PROMPTS.values():
+        assert "{illegible_instruction}" in prompt(name)
+    assert "[pause]" in prompt(NARRATE_PROMPTS["quiz"])
+    assert "{page}" in prompt(NARRATE_PROMPTS["quiz"])
+    assert "summary" in prompt(META_PROMPT)
+
+
+def test_tail_is_the_last_paragraph():
+    assert tail("") == ""
+    assert tail("## A\nOne.\n\nTwo.\n\n") == "Two."
+    assert len(tail("x" * 5000)) == 800
 
 
 def test_join_pages_marks_page_numbers():

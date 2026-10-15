@@ -72,6 +72,8 @@ type ClaimPage struct {
 	SHA256     string  `json:"sha256,omitempty"`
 	Input      string  `json:"input,omitempty"`      // path under /worker/v1/jobs/{id}/inputs/, transcribe only
 	Transcript *string `json:"transcript,omitempty"` // existing text of pages not being transcribed
+	Narration  *string `json:"narration,omitempty"`  // the page's current narration, kept unless Narrate
+	Narrate    bool    `json:"narrate,omitempty"`    // write this page's narration
 }
 
 // Claimed is everything a worker needs to run one job.
@@ -86,7 +88,7 @@ type Claimed struct {
 	Collection     string      `json:"collection,omitempty"`
 	Pages          []ClaimPage `json:"pages,omitempty"`      // transcribe, narrate
 	Transcribe     []int64     `json:"transcribe,omitempty"` // transcribe: page ids to OCR
-	Transcript     string      `json:"transcript,omitempty"` // narrate: whole note
+	Meta           bool        `json:"meta,omitempty"`       // transcribe, narrate: also title, summary, tags
 	Narration      string      `json:"narration,omitempty"`  // speak
 	Voice          string      `json:"voice,omitempty"`      // speak
 	Speed          float64     `json:"speed,omitempty"`      // speak
@@ -161,17 +163,18 @@ func (s *Service) payload(ctx context.Context, tx *sql.Tx, j *jobs.Job) (*Claime
 		Illegible: st.IllegiblePolicy,
 	}
 	switch j.Kind {
-	case notes.Transcribe:
-		var p struct {
-			PageIDs []int64 `json:"page_ids"`
-		}
-		if err := json.Unmarshal([]byte(j.Params), &p); err != nil {
+	case notes.Transcribe, notes.Narrate:
+		ocr, err := transcribeIDs(j)
+		if err != nil {
 			return nil, err
 		}
-		c.Transcribe = p.PageIDs
+		c.Transcribe = ocr
+		todo := narrateIDs(n, ocr)
+		c.Meta = wantMeta(n, ocr, todo)
 		for _, pg := range n.Pages {
-			cp := ClaimPage{PageID: pg.ID, Position: pg.Position}
-			if slices.Contains(p.PageIDs, pg.ID) {
+			cp := ClaimPage{PageID: pg.ID, Position: pg.Position, Narration: pg.Narration,
+				Narrate: slices.Contains(todo, pg.ID)}
+			if slices.Contains(ocr, pg.ID) {
 				cp.SHA256 = pg.SHA256
 				cp.Input = fmt.Sprintf("page-%d", pg.ID)
 			} else {
@@ -179,8 +182,6 @@ func (s *Service) payload(ctx context.Context, tx *sql.Tx, j *jobs.Job) (*Claime
 			}
 			c.Pages = append(c.Pages, cp)
 		}
-	case notes.Narrate:
-		c.Transcript = n.Transcript()
 	case notes.Speak:
 		c.Narration = n.Narration
 		c.Voice, c.Speed = n.Voice, n.Speed
@@ -192,6 +193,52 @@ func (s *Service) payload(ctx context.Context, tx *sql.Tx, j *jobs.Job) (*Claime
 		}
 	}
 	return c, nil
+}
+
+// transcribeIDs are the pages a transcribe job OCRs (none for other kinds).
+func transcribeIDs(j *jobs.Job) ([]int64, error) {
+	if j.Kind != notes.Transcribe {
+		return nil, nil
+	}
+	var p struct {
+		PageIDs []int64 `json:"page_ids"`
+	}
+	err := json.Unmarshal([]byte(j.Params), &p)
+	return p.PageIDs, err
+}
+
+// narrateIDs are the pages a job writes narration for: those being read now
+// and those that need it (Page.NeedsNarration). Claim and Complete both
+// compute it, from the same state: nothing can edit a note while it has a job.
+func narrateIDs(n *Note, ocr []int64) []int64 {
+	ids := []int64{}
+	for _, p := range n.Pages {
+		if slices.Contains(ocr, p.ID) || p.NeedsNarration() {
+			ids = append(ids, p.ID)
+		}
+	}
+	return ids
+}
+
+// wantMeta: regenerate the title, summary and tags when the note is new,
+// gained pages, or is being narrated from scratch (every page either redone
+// or hers). A fix to some pages keeps them.
+func wantMeta(n *Note, ocr, todo []int64) bool {
+	if n.Summary == "" || len(ocr) > 0 {
+		return true
+	}
+	for _, p := range n.Pages {
+		if p.Transcript == nil {
+			continue
+		}
+		if p.Narration == nil {
+			return true
+		}
+		if !p.NarrationEdited && !slices.Contains(todo, p.ID) {
+			return false // a model-written page kept as it is
+		}
+	}
+	return true
 }
 
 // Input returns the stored original for one page of a leased transcribe job.
@@ -294,11 +341,16 @@ type PageResult struct {
 	Transcript string `json:"transcript"`
 }
 
-type NarrationResult struct {
-	Title     string   `json:"title"`
-	Summary   string   `json:"summary"`
-	Tags      []string `json:"tags"`
-	Narration string   `json:"narration"`
+// SegmentResult is one page's narration.
+type SegmentResult struct {
+	PageID    int64  `json:"page_id"`
+	Narration string `json:"narration"`
+}
+
+type MetaResult struct {
+	Title   string   `json:"title"`
+	Summary string   `json:"summary"`
+	Tags    []string `json:"tags"`
 }
 
 type AudioResult struct {
@@ -311,10 +363,11 @@ type AudioResult struct {
 // Result is a worker's result.json. Which fields are required depends on
 // the job kind; Complete validates.
 type Result struct {
-	Pages      []PageResult     `json:"pages,omitempty"`
-	Narration  *NarrationResult `json:"narration,omitempty"`
-	Audio      *AudioResult     `json:"audio,omitempty"`
-	Provenance map[string]any   `json:"provenance,omitempty"`
+	Pages      []PageResult    `json:"pages,omitempty"`
+	Segments   []SegmentResult `json:"segments,omitempty"` // transcribe, narrate
+	Meta       *MetaResult     `json:"meta,omitempty"`     // when the claim asked for it
+	Audio      *AudioResult    `json:"audio,omitempty"`
+	Provenance map[string]any  `json:"provenance,omitempty"`
 }
 
 // Files a worker may upload with a result, and their limits.
@@ -355,7 +408,7 @@ func (s *Service) Complete(ctx context.Context, jobID int64, token string, res R
 		case notes.Transcribe:
 			err = s.completeTranscribe(ctx, tx, n, j, res, out, enq)
 		case notes.Narrate:
-			err = s.completeNarrate(ctx, tx, n, res, enq)
+			err = s.completeNarrate(ctx, tx, n, j, res, enq)
 		case notes.Speak:
 			oldAudio, err = s.completeSpeak(ctx, tx, n, res, out, enq)
 		}
@@ -389,9 +442,6 @@ func (s *Service) completeTranscribe(ctx context.Context, tx *sql.Tx, n *Note, j
 	if len(got) != len(p.PageIDs) {
 		return fmt.Errorf("%w: expected transcripts for pages %v", ErrInvalid, p.PageIDs)
 	}
-	if res.Narration == nil {
-		return fmt.Errorf("%w: transcribe result needs a narration", ErrInvalid)
-	}
 	for _, id := range p.PageIDs {
 		text, ok := got[id]
 		if !ok {
@@ -412,7 +462,7 @@ func (s *Service) completeTranscribe(ctx context.Context, tx *sql.Tx, n *Note, j
 			return err
 		}
 	}
-	if err := saveNarration(ctx, tx, n, res.Narration, s.now()); err != nil {
+	if err := saveNarration(ctx, tx, n, j, res, s.now()); err != nil {
 		return err
 	}
 	st, err := loadSettings(ctx, tx)
@@ -426,11 +476,8 @@ func (s *Service) completeTranscribe(ctx context.Context, tx *sql.Tx, n *Note, j
 	return s.transition(ctx, tx, n, ev, "", enq)
 }
 
-func (s *Service) completeNarrate(ctx context.Context, tx *sql.Tx, n *Note, res Result, enq *bool) error {
-	if res.Narration == nil {
-		return fmt.Errorf("%w: narrate result needs a narration", ErrInvalid)
-	}
-	if err := saveNarration(ctx, tx, n, res.Narration, s.now()); err != nil {
+func (s *Service) completeNarrate(ctx context.Context, tx *sql.Tx, n *Note, j *jobs.Job, res Result, enq *bool) error {
+	if err := saveNarration(ctx, tx, n, j, res, s.now()); err != nil {
 		return err
 	}
 	return s.transition(ctx, tx, n, notes.NarrateDone, "", enq)
@@ -468,11 +515,51 @@ func (s *Service) completeSpeak(ctx context.Context, tx *sql.Tx, n *Note, res Re
 	return old, s.transition(ctx, tx, n, notes.SpeakDone, "", enq)
 }
 
-func saveNarration(ctx context.Context, tx *sql.Tx, n *Note, r *NarrationResult, now time.Time) error {
-	if strings.TrimSpace(r.Narration) == "" {
+// saveNarration stores a job's page narrations, and its title, summary and
+// tags if the claim asked for them. n is the note as it was when claimed.
+func saveNarration(ctx context.Context, tx *sql.Tx, n *Note, j *jobs.Job, res Result, now time.Time) error {
+	ocr, err := transcribeIDs(j)
+	if err != nil {
+		return err
+	}
+	todo := narrateIDs(n, ocr)
+	got := map[int64]string{}
+	for _, sr := range res.Segments {
+		if !slices.Contains(todo, sr.PageID) {
+			return fmt.Errorf("%w: narration for page %d, which wasn't asked for", ErrInvalid, sr.PageID)
+		}
+		got[sr.PageID] = strings.TrimSpace(sr.Narration)
+	}
+	for _, id := range todo {
+		text, ok := got[id]
+		if !ok {
+			return fmt.Errorf("%w: missing narration for page %d", ErrInvalid, id)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE pages SET narration = ?, narration_stale = 0,
+			narration_edited = 0 WHERE id = ? AND note_id = ?`, text, id, n.ID); err != nil {
+			return err
+		}
+	}
+	if err := syncNarration(ctx, tx, n.ID); err != nil {
+		return err
+	}
+	var joined string
+	if err := tx.QueryRowContext(ctx, `SELECT narration FROM notes WHERE id = ?`, n.ID).Scan(&joined); err != nil {
+		return err
+	}
+	if strings.TrimSpace(joined) == "" {
 		return fmt.Errorf("%w: narration is empty", ErrInvalid)
 	}
-	tags := r.Tags
+	ts := store.Now(now)
+	m := res.Meta
+	if m == nil {
+		if wantMeta(n, ocr, todo) {
+			return fmt.Errorf("%w: result needs a title, summary and tags", ErrInvalid)
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE notes SET updated_at = ? WHERE id = ?`, ts, n.ID)
+		return err
+	}
+	tags := m.Tags
 	if tags == nil {
 		tags = []string{}
 	}
@@ -480,10 +567,10 @@ func saveNarration(ctx context.Context, tx *sql.Tx, n *Note, r *NarrationResult,
 	// A title the user typed wins over a generated one.
 	title := n.Title
 	if title == "" {
-		title = r.Title
+		title = m.Title
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE notes SET title = ?, summary = ?, tags = ?, narration = ?,
-		narration_stale = 0, updated_at = ? WHERE id = ?`, title, r.Summary, string(tagJSON), r.Narration, store.Now(now), n.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE notes SET title = ?, summary = ?, tags = ?, updated_at = ? WHERE id = ?`,
+		title, m.Summary, string(tagJSON), ts, n.ID)
 	return err
 }
 

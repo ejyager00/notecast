@@ -78,21 +78,32 @@
     {{range .Collections}}<option value="{{.ID}}" {{if eq (deref $n.CollectionID) .ID}}selected{{end}}>{{.Name}}</option>{{end}}
   </select>
 
-  <h2>What was read from each page</h2>
-  <p class="muted small">Fix anything misread. <span class="flags"><span>[?word]</span></span> marks a guess, <span class="flags"><span>[illegible]</span></span> text that couldn’t be read.</p>
+  <h2>Each page</h2>
+  <p class="muted small">Fix anything misread. <span class="flags"><span>[?word]</span></span> marks a guess, <span class="flags"><span>[illegible]</span></span> text that couldn’t be read.{{if not $n.Legacy}} Below each page is what will be read aloud; a line starting with <code>## </code> starts a new chapter.{{end}}</p>
   {{range $i, $p := $n.Pages}}{{if $p.Transcript}}
   <div class="page-review">
     <a href="/notes/{{$n.PID}}/pages/{{$p.ID}}/display" target="_blank" rel="noopener"><img src="/notes/{{$n.PID}}/pages/{{$p.ID}}/display" alt="Page {{add $i 1}}" loading="lazy"></a>
     {{with flags (deref $p.Transcript)}}<p class="flags">Check: {{range .}}<span>{{.}}</span>{{end}}</p>{{end}}
-    <label for="t{{$p.ID}}">Page {{add $i 1}}</label>
+    <label for="t{{$p.ID}}">Page {{add $i 1}}{{if not $n.Legacy}}, as written{{end}}</label>
     <textarea class="transcript" id="t{{$p.ID}}" name="transcript-{{$p.ID}}" spellcheck="false">{{deref $p.Transcript}}</textarea>
+    {{if not $n.Legacy}}
+    <label for="n{{$p.ID}}">Page {{add $i 1}}, read aloud</label>
+    {{if $p.NarrationStale}}<p class="banner warn small">You changed this page after its narration was written.</p>
+    {{else if not $p.Narration}}<p class="muted small">Not narrated yet. Rewrite narration fills this in.</p>
+    {{else if $p.NarrationEdited}}<p class="muted small">Your edit. Rewriting leaves it alone unless the page changes; empty it to have it rewritten.</p>{{end}}
+    <textarea id="n{{$p.ID}}" name="narration-{{$p.ID}}" aria-label="Page {{add $i 1}} narration" rows="8">{{deref $p.Narration}}</textarea>
+    {{end}}
   </div>
   {{end}}{{end}}
 
+  {{if $n.Legacy}}
   <h2>Narration</h2>
   {{if $n.NarrationStale}}<div class="banner warn">You changed the transcript after this narration was written. Rewrite it so the audio matches.</div>{{end}}
-  <p class="muted small">This is what will be read aloud. A line starting with <code>## </code> starts a new chapter.</p>
+  <p class="muted small">This is what will be read aloud. A line starting with <code>## </code> starts a new chapter. It was written for the whole note at once; rewrite it to get one you can fix page by page.</p>
   <textarea id="narration" name="narration" aria-label="Narration" rows="14">{{$n.Narration}}</textarea>
+  {{else if $n.NarrationStale}}
+  <div class="banner warn">Some pages changed after their narration was written, or haven’t been narrated yet. Rewriting redoes just those pages.</div>
+  {{end}}
 
   <details><summary>Voice for this note</summary>
     <label for="voice">Voice</label>
@@ -113,7 +124,7 @@
 
   <div class="row mt">
     {{if $n.NarrationStale}}
-      <button class="primary" type="submit" name="then" value="rewrite">Rewrite narration</button>
+      <button class="primary" type="submit" name="then" value="rewrite">{{if $n.Legacy}}Rewrite narration{{else}}Rewrite changed pages{{end}}</button>
       <button type="submit" name="then" value="approve-anyway">Make audio anyway</button>
     {{else}}
       <button class="primary" type="submit" name="then" value="approve">Make audio</button>

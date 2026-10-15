@@ -303,3 +303,11 @@ and anything the next session needs to know._
   3 pages. **GPU abandoned** (ARCHITECTURE §11a): CPU-only from here.
   Next: CPU OCR eval on full-res pages; Python worker main loop (client.py,
   main.py) against the real worker API; deploy files.
+- 2026-10-15: Deployed at notecast.yager.me; worker running by hand on
+  roundabits (Shepherd service still to do, Phase 7). First real note (8 pages)
+  went through: ~6.5 min/page OCR, 17 min narration on the CPU. Worker fixes:
+  1 h timeout for the managed llama-server, per-page OCR cache. Then
+  **narration per page** (ARCHITECTURE §3.3, migration 0002): rewrites redo only
+  changed pages, her edits are kept, per-page narration cache. She agreed to
+  OpenRouter for narration (docs/changelog.md); waiting on an API key, then
+  compare GLM 5.3 Flash against the local model on her note.

@@ -15,7 +15,7 @@ func TestOpenMigratesAndIsIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 		var v int
-		if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
+		if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 2 {
 			t.Fatalf("user_version = %d, %v", v, err)
 		}
 		var fk int

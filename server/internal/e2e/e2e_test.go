@@ -298,7 +298,7 @@ func TestFullLifecycle(t *testing.T) {
 
 	// Editing the narration of a ready note goes back to review with the old
 	// audio still live; re-speaking replaces it.
-	e.mustPost("/notes/"+pid+"/edit", url.Values{"narration": {"## Glycolysis\nShorter."}})
+	e.mustPost("/notes/"+pid+"/edit", url.Values{fmt.Sprintf("narration-%d", n.Pages[1].ID): {"## Glycolysis\nShorter."}})
 	n = e.note(pid)
 	wantStatus(t, n, notes.Review)
 	if n.AudioVersion != 1 {

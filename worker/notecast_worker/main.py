@@ -38,7 +38,12 @@ MANAGED_TIMEOUT = 3600.0
 
 # Page transcripts, kept so a retry after a failed narration doesn't spend
 # another hour re-reading the same photos. Keyed by image, model and prompt.
-OCR_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "notecast/ocr"
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "notecast"
+OCR_CACHE = CACHE / "ocr"
+
+# Page narrations, for the same reason: a retry picks up at the page that
+# failed. Keyed by everything the narration prompt sees.
+NARRATION_CACHE = CACHE / "narration"
 
 
 class Aborted(Exception):
@@ -97,6 +102,7 @@ class Worker:
         self.providers = {name: self._provider(name, p) for name, p in cfg.providers.items()}
         self._engine: tts.SpeechEngine | None = None
         self.ocr_cache: Path | None = OCR_CACHE
+        self.narration_cache: Path | None = NARRATION_CACHE
 
     # --- setup -------------------------------------------------------------
 
@@ -255,30 +261,77 @@ class Worker:
                     cached.parent.mkdir(parents=True, exist_ok=True)
                     cached.write_text(r.markdown)
             prov = {**pipeline._prov(ocr, pipeline.OCR_PROMPT), "long_edge": self.cfg.ocr_long_edge}
-        full = pipeline.join_pages(
-            [texts.get(p["page_id"]) or p.get("transcript") or "" for p in pages]
-        )
-        hb.step("writing narration")
-        nar = self._narrate(full, job)
+        for p in pages:
+            if p["page_id"] in texts:
+                p["transcript"] = texts[p["page_id"]]
+        segments, meta, nprov = self._narrate(pages, job, hb)
         result = {
             "pages": [{"page_id": pid, "transcript": t} for pid, t in texts.items()],
-            "narration": nar[0],
-            "provenance": {"ocr": prov, "narrate": nar[1]},
+            "segments": segments,
+            "provenance": {"ocr": prov, "narrate": nprov},
         }
+        if meta:
+            result["meta"] = meta
         return result, files
 
     def narrate(self, job: dict[str, Any], hb: Heartbeat):
-        hb.step("writing narration")
-        nar, prov = self._narrate(job["transcript"], job)
-        return {"narration": nar, "provenance": prov}, {}
+        pages = sorted(job["pages"], key=lambda p: p["position"])
+        segments, meta, prov = self._narrate(pages, job, hb)
+        result: dict[str, Any] = {"segments": segments, "provenance": prov}
+        if meta:
+            result["meta"] = meta
+        return result, {}
 
-    def _narrate(self, transcript: str, job: dict[str, Any]):
+    def _narrate(self, pages: list[dict[str, Any]], job: dict[str, Any], hb: Heartbeat):
+        """Narrate the pages the server marked, in order, each carrying on from
+        the narration before it (new or kept); then title, summary and tags if
+        asked. Returns (segments, meta or None, provenance)."""
+        chat = self.chat("narrate")
         policy = job.get("illegible_policy") or "skip"
-        n = pipeline.narrate(self.chat("narrate"), transcript, policy, self.cfg.narration_style)
-        return (
-            {"title": n.title, "summary": n.summary, "tags": n.tags, "narration": n.narration},
-            {**n.provenance, "style": self.cfg.narration_style},
-        )
+        style = self.cfg.narration_style
+        name = pipeline.NARRATE_PROMPTS[style]
+        todo = [p for p in pages if p.get("narrate")]
+        segments: list[dict[str, Any]] = []
+        so_far: list[str] = []
+        done = 0
+        for p in pages:
+            if p.get("transcript") is None:
+                continue  # not read yet; not part of the script
+            if not p.get("narrate"):
+                so_far.append(p.get("narration") or "")
+                continue
+            done += 1
+            hb.step(f"narrating page {done} of {len(todo)}")
+            before = pipeline.tail(pipeline.join_narrations(so_far))
+            page_no = len(so_far) + 1
+            key = hashlib.sha256(
+                repr((chat.model, name, policy, page_no, before, p["transcript"])).encode()
+            ).hexdigest()
+            cached = self.narration_cache / f"{key}.txt" if self.narration_cache else None
+            if cached and cached.exists():
+                log.info("job %s: narration %d of %d from cache", job["job_id"], done, len(todo))
+                text = cached.read_text()
+            else:
+                text = pipeline.narrate_page(
+                    chat, p["transcript"], before, page_no, policy, style
+                ).narration
+                if cached:
+                    cached.parent.mkdir(parents=True, exist_ok=True)
+                    cached.write_text(text)
+            segments.append({"page_id": p["page_id"], "narration": text})
+            so_far.append(text)
+        prov: dict[str, Any] = {**pipeline._prov(chat, name), "style": style}
+        meta = None
+        if job.get("meta"):
+            hb.step("writing title and summary")
+            m = pipeline.meta(
+                chat,
+                pipeline.join_pages(
+                    [p["transcript"] for p in pages if p.get("transcript") is not None]
+                ),
+            )
+            meta = {"title": m.title, "summary": m.summary, "tags": m.tags}
+        return segments, meta, prov
 
     def speak(self, job: dict[str, Any], hb: Heartbeat):
         hb.step("making audio")

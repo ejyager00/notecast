@@ -137,7 +137,8 @@ func TestFeeds(t *testing.T) {
 	}
 
 	// Re-speaking makes a new episode (new GUID) and drops the old one.
-	e.mustPost("/notes/"+p2+"/edit", url.Values{"narration": {"## New\nDifferent words."}})
+	e.mustPost("/notes/"+p2+"/edit", url.Values{
+		fmt.Sprintf("narration-%d", e.note(p2).Pages[0].ID): {"## New\nDifferent words."}})
 	e.mustPost("/notes/"+p2+"/approve", nil)
 	e.process(notes.Speak)
 	_, all = e.feed("/feed/" + tok + "/all.xml")

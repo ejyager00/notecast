@@ -159,14 +159,20 @@ func Canned(job *core.Claimed) (core.Result, map[string][]byte) {
 			out[fmt.Sprintf("display-%d.jpg", id)] = TinyJPEG()
 			out[fmt.Sprintf("thumb-%d.jpg", id)] = TinyJPEG()
 		}
-		res.Narration = &core.NarrationResult{Title: "Glycolysis basics", Summary: "How glucose becomes pyruvate.",
-			Tags: []string{"metabolism"}, Narration: "## Glycolysis\nGlucose is split into two molecules of pyruvate, netting two ATP."}
+		res.Segments = segments(job, "Glucose is split into two molecules of pyruvate, netting two ATP.")
+		if job.Meta {
+			res.Meta = &core.MetaResult{Title: "Glycolysis basics", Summary: "How glucose becomes pyruvate.",
+				Tags: []string{"metabolism"}}
+		}
 		res.Provenance = prov
 		return res, out
 	case notes.Narrate:
-		return core.Result{Narration: &core.NarrationResult{Title: "Glycolysis, revised", Summary: "Revised.",
-			Tags: []string{"metabolism", "revised"}, Narration: "## Glycolysis\nRevised narration mentioning mitochondria."},
-			Provenance: prov}, out
+		res := core.Result{Segments: segments(job, "Revised narration mentioning mitochondria."), Provenance: prov}
+		if job.Meta {
+			res.Meta = &core.MetaResult{Title: "Glycolysis, revised", Summary: "Revised.",
+				Tags: []string{"metabolism", "revised"}}
+		}
+		return res, out
 	case notes.Speak:
 		out["audio.mp3"] = append([]byte("ID3"), make([]byte, 1024)...)
 		out["chapters.json"] = []byte(`{"version":"1.2.0","chapters":[{"startTime":0,"title":"Glycolysis"}]}`)
@@ -174,6 +180,18 @@ func Canned(job *core.Claimed) (core.Result, map[string][]byte) {
 			Chapters: []core.Chapter{{Start: 0, Title: "Glycolysis"}}}, Provenance: prov}, out
 	}
 	return core.Result{}, out
+}
+
+// segments narrates each page the claim marked.
+func segments(job *core.Claimed, text string) []core.SegmentResult {
+	var out []core.SegmentResult
+	for _, p := range job.Pages {
+		if p.Narrate {
+			out = append(out, core.SegmentResult{PageID: p.PageID,
+				Narration: fmt.Sprintf("## Page %d\n%s", p.Position, text)})
+		}
+	}
+	return out
 }
 
 // Process claims and completes one job; false if there was none.

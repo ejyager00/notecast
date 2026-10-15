@@ -213,7 +213,8 @@ func (h *Web) noteAction(w http.ResponseWriter, r *http.Request) {
 }
 
 // edit saves the review form. Fields absent from the form are unchanged;
-// transcripts arrive as transcript-<page id>.
+// transcripts and narrations arrive as transcript-<page id> and
+// narration-<page id>.
 func (h *Web) edit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -248,16 +249,22 @@ func (h *Web) edit(w http.ResponseWriter, r *http.Request) {
 		e.Speed = &f // 0 = use the default
 	}
 	for k, v := range r.PostForm {
-		if idStr, ok := strings.CutPrefix(k, "transcript-"); ok {
+		for prefix, dst := range map[string]*map[int64]string{
+			"transcript-": &e.Transcripts, "narration-": &e.Narrations,
+		} {
+			idStr, ok := strings.CutPrefix(k, prefix)
+			if !ok {
+				continue
+			}
 			id, err := strconv.ParseInt(idStr, 10, 64)
 			if err != nil {
 				h.fail(w, r, core.ErrInvalid)
 				return
 			}
-			if e.Transcripts == nil {
-				e.Transcripts = map[int64]string{}
+			if *dst == nil {
+				*dst = map[int64]string{}
 			}
-			e.Transcripts[id] = normalizeNewlines(v[0])
+			(*dst)[id] = normalizeNewlines(v[0])
 		}
 	}
 	pid := r.PathValue("pid")

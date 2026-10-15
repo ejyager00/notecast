@@ -76,7 +76,8 @@ func TestPagesThroughLifecycle(t *testing.T) {
 	job, _ := e.worker.Claim(notes.Transcribe)
 	res, out := fakeworker.Canned(job)
 	res.Pages[0].Transcript = "Taenia [?solium] <script>alert(1)</script> [illegible]"
-	res.Narration.Title = `<img src=x onerror=alert(1)>`
+	res.Meta.Title = `<img src=x onerror=alert(1)>`
+	res.Segments[0].Narration = "<script>alert(2)</script> read aloud"
 	if err := e.worker.Complete(job, res, out); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestPagesThroughLifecycle(t *testing.T) {
 	if n := e.note(pid); *n.Pages[0].Transcript != "Taenia solium" || n.Status != notes.Review {
 		t.Fatal("edits not saved before the refused action")
 	}
-	e.page(loc, "Saved.", "Rewrite narration", "Make audio anyway")
+	e.page(loc, "Saved.", "Rewrite changed pages", "Make audio anyway", "You changed this page after its narration was written.")
 
 	e.mustPost("/notes/"+pid+"/edit", url.Values{"then": {"approve-anyway"}})
 	e.process(notes.Speak)

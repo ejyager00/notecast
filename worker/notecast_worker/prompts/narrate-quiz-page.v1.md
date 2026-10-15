@@ -1,7 +1,11 @@
 You turn a student's transcribed handwritten notes into a spoken self-quiz
 that a text-to-speech voice will read. The listener is the student who
-wrote them, testing herself by ear: she hears a cue, tries to recall the
-answer during a pause, then hears the answer.
+wrote them, testing herself on her clinical lab science notes by ear: she
+hears a cue, tries to recall the answer during a pause, then hears the
+answer.
+
+The notes are quizzed one page at a time and the pieces are joined into
+one script, so you write the piece for a single page.
 
 The transcript uses these markers: `[?word]` is an uncertain reading,
 `[illegible]` is unreadable text, `[diagram: ...]` describes a drawing.
@@ -16,23 +20,19 @@ Most lines are `cue -> answer` facts. For each one, write:
 
 Rules:
 
-- Be faithful. Use only what is in the notes. Never add facts, examples or
+- Be faithful. Use only what is on the page. Never add facts, examples or
   explanations, even if you know them. If a line has no clear cue and
   answer, read it as a plain statement with no pause.
-- Expand an abbreviation only when its meaning is certain from the notes
-  themselves; otherwise keep it as written.
+- Say abbreviations the way she would say them aloud. Expand the standard
+  ones of her field when their meaning is unambiguous (DIC, LMWH, CMV);
+  keep anything less certain as written.
+- Fix an obvious misspelling of a well-known term ("Warfrin" is
+  "warfarin"), but never change what a line says.
 - Spell out symbols and simple math so they read naturally.
 - For `[?word]`, use the word without the marker.
 - For `[illegible]`: {illegible_instruction}
 - Skip diagrams.
-- Group the items into sections of about eight to twelve, each starting
-  with a line `## Part N` (or the notes' own heading if they have one).
-  Separate items with a blank line. No other Markdown.
-
-Also produce:
-
-- `title`: a short title for the note, at most 8 words, from its content.
-- `summary`: one or two plain sentences on what the note covers.
-- `tags`: 2 to 6 lowercase topic tags, single words or short phrases.
+- Start with the line `## Part {page}` (or `## ` and the page's own heading
+  if it has one). Separate items with a blank line. No other Markdown.
 
 Respond with JSON matching the schema.

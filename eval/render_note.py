@@ -50,7 +50,9 @@ def main() -> None:
     with LlamaServer(model, device=args.device, log_path=args.out / "llama-server.log") as srv:
         chat = OpenAIChat(args.model, srv.base_url, args.model, extra_body=body)
         if args.transcript:
-            transcript = args.transcript.read_text()
+            # One page per `<!-- page N -->` block, as join_pages writes them.
+            raw = args.transcript.read_text()
+            texts = [b.split("-->", 1)[-1].strip() for b in raw.split("<!-- page ") if b.strip()]
         else:
             texts = []
             for p in args.pages:
@@ -58,15 +60,17 @@ def main() -> None:
                 r = pipeline.ocr_page(chat, n.ocr)
                 logging.info("ocr %s: %.1fs", p.name, r.seconds)
                 texts.append(r.markdown)
-            transcript = pipeline.join_pages(texts)
-            (args.out / "transcript.md").write_text(transcript + "\n")
-        nar = pipeline.narrate(chat, transcript, args.illegible, args.style)
-        logging.info("narrate: %.1fs", nar.seconds)
-    (args.out / "narration.json").write_text(json.dumps(nar.__dict__, indent=2))
+            (args.out / "transcript.md").write_text(pipeline.join_pages(texts) + "\n")
+        t0 = time.monotonic()
+        narration, nar = pipeline.narrate_note(chat, texts, args.illegible, args.style)
+        logging.info("narrate: %.1fs", time.monotonic() - t0)
+    (args.out / "narration.json").write_text(
+        json.dumps({**nar.__dict__, "narration": narration}, indent=2)
+    )
 
     engine = tts.KokoroEngine(model_path("kokoro-v1.0.onnx"), model_path("kokoro-voices-v1.0.bin"))
     t0 = time.monotonic()
-    rendered = tts.render(nar.narration, engine, args.voice, args.speed, title=nar.title)
+    rendered = tts.render(narration, engine, args.voice, args.speed, title=nar.title)
     logging.info("tts: %.1fs audio in %.1fs", rendered.seconds, time.monotonic() - t0)
     mp3 = args.out / f"{args.style}-{args.voice}-{args.speed:g}.mp3"
     audio.encode_mp3(rendered, mp3, nar.title)
