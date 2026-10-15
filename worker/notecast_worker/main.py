@@ -6,7 +6,9 @@ notecast-worker --config ~/.config/notecast/worker.toml [--once]
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
+import os
 import random
 import signal
 import subprocess
@@ -29,6 +31,14 @@ from .models import model_path
 log = logging.getLogger("notecast.worker")
 
 HEARTBEAT_EVERY = 30.0  # server lease is 120 s
+
+# A whole note's narration on the CPU can run past 10 minutes; the managed
+# llama-server is on loopback, so a long wait means work, not a dead link.
+MANAGED_TIMEOUT = 3600.0
+
+# Page transcripts, kept so a retry after a failed narration doesn't spend
+# another hour re-reading the same photos. Keyed by image, model and prompt.
+OCR_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "notecast/ocr"
 
 
 class Aborted(Exception):
@@ -86,6 +96,7 @@ class Worker:
         self.server = self._llama_server()
         self.providers = {name: self._provider(name, p) for name, p in cfg.providers.items()}
         self._engine: tts.SpeechEngine | None = None
+        self.ocr_cache: Path | None = OCR_CACHE
 
     # --- setup -------------------------------------------------------------
 
@@ -107,7 +118,7 @@ class Worker:
         if p.get("managed"):
             if self.server is None:
                 raise ValueError(f"provider {name!r} is managed but [llama] is not configured")
-            p = {**p, "base_url": self.server.base_url}
+            p = {"timeout": MANAGED_TIMEOUT, **p, "base_url": self.server.base_url}
         return OpenAIChat.from_config(name, p)
 
     def engine(self) -> tts.SpeechEngine:
@@ -229,9 +240,21 @@ class Worker:
         prov: dict[str, Any] = {}
         for i, p in enumerate(todo, 1):
             hb.step(f"reading page {i} of {len(todo)}")
-            r = pipeline.ocr_page(ocr, ocr_in[p["page_id"]], **overrides)
-            texts[p["page_id"]] = r.markdown
-            prov = {**r.provenance, "long_edge": self.cfg.ocr_long_edge}
+            key = hashlib.sha256(
+                repr((ocr.model, pipeline.OCR_PROMPT, sorted(overrides.items()))).encode()
+                + ocr_in[p["page_id"]]
+            ).hexdigest()
+            cached = self.ocr_cache / f"{key}.md" if self.ocr_cache else None
+            if cached and cached.exists():
+                log.info("job %s: page %d of %d from cache", job["job_id"], i, len(todo))
+                texts[p["page_id"]] = cached.read_text()
+            else:
+                r = pipeline.ocr_page(ocr, ocr_in[p["page_id"]], **overrides)
+                texts[p["page_id"]] = r.markdown
+                if cached:
+                    cached.parent.mkdir(parents=True, exist_ok=True)
+                    cached.write_text(r.markdown)
+            prov = {**pipeline._prov(ocr, pipeline.OCR_PROMPT), "long_edge": self.cfg.ocr_long_edge}
         full = pipeline.join_pages(
             [texts.get(p["page_id"]) or p.get("transcript") or "" for p in pages]
         )

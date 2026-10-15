@@ -83,6 +83,7 @@ def worker(client, chat=None) -> M.Worker:
     w = M.Worker(cfg, client=client)
     w.providers["p"] = chat or FakeChat()
     w._engine = FakeEngine()
+    w.ocr_cache = None
     return w
 
 
@@ -109,6 +110,34 @@ def test_transcribe_ocrs_only_new_pages_and_narrates_whole_note():
     assert "old page" in narrate_input and "page text 1" in narrate_input
     assert result["narration"]["tags"] == ["hematology"]
     assert result["provenance"]["ocr"]["model"] == "fake-model"
+
+
+def test_retry_after_failed_narration_reuses_page_text(tmp_path, monkeypatch):
+    pages = [{"page_id": 1, "position": 1, "input": "page-1"}]
+    c, chat = FakeClient({"page-1": jpeg()}), FakeChat()
+    w = worker(c, chat)
+    w.ocr_cache = tmp_path
+
+    def narrate_times_out(*a, **kw):
+        raise TimeoutError("narration timed out")
+
+    with monkeypatch.context() as m:
+        m.setattr(M.pipeline, "narrate", narrate_times_out)
+        w.run(job("transcribe", transcribe=[1], pages=pages))
+    assert c.failed and c.failed[0][1], "retryable"
+    assert len(chat.calls) == 1
+
+    w.run(job("transcribe", transcribe=[1], pages=pages, attempt=2))
+    result, _ = c.completed[0]
+    assert result["pages"] == [{"page_id": 1, "transcript": "page text 1"}]
+    assert [x["json"] for x in chat.calls] == [False, True], "OCR ran once; retry only narrated"
+
+
+def test_managed_provider_waits_long_for_local_model():
+    w = worker(FakeClient())
+    w.server = type("S", (), {"base_url": "http://127.0.0.1:8092/v1"})()
+    assert w._provider("local", {"kind": "openai", "managed": True}).timeout == M.MANAGED_TIMEOUT
+    assert w._provider("x", {"kind": "openai", "base_url": "http://c/v1"}).timeout == 600
 
 
 def test_speak_produces_tagged_mp3_with_chapters():
