@@ -1,0 +1,36 @@
+{{define "content"}}
+<form class="search" action="/" method="get" role="search"
+      hx-get="/search" hx-target="#results" hx-push-url="true"
+      hx-trigger="input changed delay:300ms from:input, change from:select, submit">
+  <input type="search" name="q" value="{{.Query}}" placeholder="Search your notes" aria-label="Search" autocomplete="off">
+  {{if .Collections}}
+  <select name="c" aria-label="Collection">
+    <option value="">All</option>
+    {{range .Collections}}<option value="{{.ID}}" {{if eq (deref $.CollectionID) .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+  </select>
+  {{end}}
+</form>
+{{template "worker-banner" .}}
+<div id="results">{{template "results" .}}</div>
+{{end}}
+
+{{define "results"}}
+{{if .Items}}
+<ul class="notes">
+{{range .Items}}
+  <li><a class="note" href="/notes/{{.PID}}">
+    <div class="row"><span class="title">{{or .Title "Untitled note"}}</span> {{if ne .Status "ready"}}<span class="badge {{.Status}}">{{statusLabel .Status}}</span>{{end}}</div>
+    <div class="meta">{{if .CollectionName}}{{.CollectionName}} · {{end}}{{date .CreatedAt}} · {{.Pages}} page{{if ne .Pages 1}}s{{end}}{{if .AudioSeconds}} · {{dur .AudioSeconds}}{{end}}</div>
+    {{if .Snippet}}<div class="snippet">{{snippet .Snippet}}</div>{{else if .Summary}}<div class="snippet">{{.Summary}}</div>{{end}}
+  </a></li>
+{{end}}
+</ul>
+{{else if .Query}}
+<p class="muted">No notes match “{{.Query}}”.</p>
+{{else}}
+<div class="card">
+  <p>No notes yet.</p>
+  <a class="button primary" href="/new">Add your first note</a>
+</div>
+{{end}}
+{{end}}

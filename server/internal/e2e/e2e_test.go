@@ -72,7 +72,11 @@ func setup(t *testing.T) *env {
 	svc := core.New(db, fs, clk.Now)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	pub := auth.Dev("dev@example.com", auth.SameOrigin(origin, (&web.Web{Svc: svc, Log: log}).Handler()))
+	webh, err := (&web.Web{Svc: svc, Log: log, Version: "test"}).Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := auth.Dev("dev@example.com", auth.SameOrigin(origin, webh))
 	public := httptest.NewServer(pub)
 	t.Cleanup(public.Close)
 	sum := sha256.Sum256([]byte(token))

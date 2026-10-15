@@ -1,0 +1,39 @@
+{{define "worker-banner"}}
+{{with .Worker}}{{if not .Online}}{{if $.Pending}}
+<div class="banner warn">The processing machine is offline{{if not .LastSeen.IsZero}} (last seen {{ago .LastSeen}}){{end}}. {{$.Pending}} note{{if ne $.Pending 1}}s are{{else}} is{{end}} waiting and will be processed when it’s back.</div>
+{{end}}{{end}}{{end}}
+{{end}}
+
+{{define "job-status"}}
+<div id="job-status" class="banner info" {{if .Note.Job}}hx-get="/notes/{{.Note.PID}}/status" hx-trigger="every 4s" hx-swap="outerHTML"{{end}} aria-live="polite">
+  <strong>{{statusLabel .Note.Status}}</strong> — {{.JobLabel}}
+  {{if .Note.Job}}
+  <form class="inline" method="post" action="/notes/{{.Note.PID}}/cancel"><button class="link" type="submit">Cancel</button></form>
+  {{end}}
+</div>
+{{end}}
+
+{{define "page-thumbs"}}
+<div class="pages">
+{{range $i, $p := .Note.Pages}}
+  <figure>
+    <img src="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/thumb" alt="Page {{add $i 1}}" loading="lazy">
+    {{if $.Editable}}
+    <figcaption>
+      <form class="inline" method="post" action="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/up"><button class="link" type="submit" aria-label="Move page {{add $i 1}} earlier" {{if eq $i 0}}disabled{{end}}>↑</button></form>
+      <span class="small muted">{{add $i 1}}</span>
+      <form class="inline" method="post" action="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/down"><button class="link" type="submit" aria-label="Move page {{add $i 1}} later">↓</button></form>
+      <form class="inline" method="post" action="/notes/{{$.Note.PID}}/pages/{{$p.ID}}/delete"><button class="link danger" type="submit" aria-label="Remove page {{add $i 1}}">✕</button></form>
+    </figcaption>
+    {{end}}
+  </figure>
+{{end}}
+</div>
+{{end}}
+
+{{define "uploader"}}
+{{/* No capture attribute: iOS then offers Take Photo, Photo Library and Files. */}}
+<input class="visually-hidden" id="pages-input" type="file" accept="image/*" multiple data-upload="/notes/{{.Note.PID}}/pages">
+<label class="button" for="pages-input">{{if .Note.Pages}}Add more photos{{else}}Add photos{{end}}</label>
+<ul id="upload-list" class="upload-list"></ul>
+{{end}}

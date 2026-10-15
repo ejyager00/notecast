@@ -15,33 +15,68 @@ import (
 )
 
 type Web struct {
-	Svc *core.Service
-	Log *slog.Logger
+	Svc     *core.Service
+	Log     *slog.Logger
+	Version string // cache-busts static assets; "dev" disables caching
+
+	tmpl templates
 }
 
-func (h *Web) Handler() http.Handler {
+func (h *Web) Handler() (http.Handler, error) {
+	t, err := loadTemplates()
+	if err != nil {
+		return nil, err
+	}
+	h.tmpl = t
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	mux.Handle("GET /static/", h.static())
+	mux.HandleFunc("GET /{$}", h.library)
+	mux.HandleFunc("GET /search", h.library)
+	mux.HandleFunc("GET /new", h.newNote)
+	mux.HandleFunc("GET /settings", h.settings)
+	mux.HandleFunc("POST /settings", h.saveSettings)
+	mux.HandleFunc("POST /collections", h.createCollection)
+	mux.HandleFunc("POST /collections/{id}/{action}", h.collectionAction)
+	mux.HandleFunc("GET /notes/{pid}", h.note)
+	mux.HandleFunc("GET /notes/{pid}/status", h.status)
+	mux.HandleFunc("GET /notes/{pid}/audio", h.audio)
+	mux.HandleFunc("GET /notes/{pid}/pages/{id}/{kind}", h.pageImage)
 	mux.HandleFunc("POST /notes", h.createNote)
 	mux.HandleFunc("POST /notes/{pid}/pages", h.addPage)
 	mux.HandleFunc("POST /notes/{pid}/pages/{id}/{action}", h.pageAction)
 	mux.HandleFunc("POST /notes/{pid}/edit", h.edit)
 	mux.HandleFunc("POST /notes/{pid}/{action}", h.noteAction)
-	return mux
+	return securityHeaders(mux), nil
 }
 
+// fail answers with an error page (or plain text for the upload XHR, which
+// shows the response body next to the file).
 func (h *Web) fail(w http.ResponseWriter, r *http.Request, err error) {
+	code, title := http.StatusInternalServerError, "Something went wrong"
 	switch {
 	case errors.Is(err, core.ErrNotFound):
-		http.Error(w, "not found", http.StatusNotFound)
+		code, title = http.StatusNotFound, "Not found"
 	case errors.Is(err, core.ErrInvalid):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		code, title = http.StatusBadRequest, "That didn’t work"
 	case errors.Is(err, core.ErrConflict):
-		http.Error(w, err.Error(), http.StatusConflict)
+		code, title = http.StatusConflict, "That can’t be done right now"
 	default:
 		h.Log.Error("web", "path", r.URL.Path, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
+	msg := "Please try again."
+	if code != http.StatusInternalServerError {
+		msg = userMsg(err)
+	}
+	if strings.HasSuffix(r.URL.Path, "/pages") || h.tmpl == nil {
+		http.Error(w, msg, code)
+		return
+	}
+	back := ""
+	if pid := r.PathValue("pid"); pid != "" && code != http.StatusNotFound {
+		back = "/notes/" + pid
+	}
+	h.render(w, r, code, "error", "layout", &view{Title: title, Flash: msg, Back: back})
 }
 
 func seeOther(w http.ResponseWriter, r *http.Request, pid string) {
@@ -197,7 +232,7 @@ func (h *Web) edit(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, core.ErrInvalid)
 			return
 		}
-		e.Speed = &f
+		e.Speed = &f // 0 = use the default
 	}
 	for k, v := range r.PostForm {
 		if idStr, ok := strings.CutPrefix(k, "transcript-"); ok {
@@ -212,11 +247,35 @@ func (h *Web) edit(w http.ResponseWriter, r *http.Request) {
 			e.Transcripts[id] = normalizeNewlines(v[0])
 		}
 	}
-	if err := h.Svc.SaveEdits(r.Context(), r.PathValue("pid"), e); err != nil {
+	pid := r.PathValue("pid")
+	if err := h.Svc.SaveEdits(r.Context(), pid, e); err != nil {
+		if errors.Is(err, core.ErrConflict) || errors.Is(err, core.ErrInvalid) {
+			backWithMessage(w, r, pid, userMsg(err))
+			return
+		}
 		h.fail(w, r, err)
 		return
 	}
-	seeOther(w, r, r.PathValue("pid"))
+	// The review form's buttons save first and then act, so pressing
+	// "Make audio" never discards edits made on the way.
+	var err error
+	switch r.PostForm.Get("then") {
+	case "approve":
+		err = h.Svc.Approve(r.Context(), pid, false)
+	case "approve-anyway":
+		err = h.Svc.Approve(r.Context(), pid, true)
+	case "rewrite":
+		err = h.Svc.Rewrite(r.Context(), pid)
+	}
+	if err != nil {
+		if errors.Is(err, core.ErrConflict) || errors.Is(err, core.ErrInvalid) {
+			backWithMessage(w, r, pid, "Saved. "+userMsg(err))
+			return
+		}
+		h.fail(w, r, err)
+		return
+	}
+	seeOther(w, r, pid)
 }
 
 // Browsers submit textareas with CRLF; store LF so edits compare equal.

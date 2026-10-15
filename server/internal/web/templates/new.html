@@ -1,0 +1,12 @@
+{{define "content"}}
+<h1>New note</h1>
+<form method="post" action="/notes">
+  <label for="c">Collection</label>
+  <select id="c" name="collection_id">
+    <option value="">None</option>
+    {{range .Collections}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+  </select>
+  <p class="muted small">Collections are managed in <a href="/settings">Settings</a>. Each one gets its own podcast feed.</p>
+  <div class="row"><button class="primary" type="submit">Next: add pages</button></div>
+</form>
+{{end}}

@@ -407,10 +407,14 @@ func (s *Service) SaveEdits(ctx context.Context, pid string, e Edits) error {
 			}
 		}
 		if e.Speed != nil {
-			if *e.Speed < 0.5 || *e.Speed > 2 {
-				return fmt.Errorf("%w: speed must be between 0.5 and 2", ErrInvalid)
+			var speed any // 0 clears the override
+			if *e.Speed != 0 {
+				if *e.Speed < 0.5 || *e.Speed > 2 {
+					return fmt.Errorf("%w: speed must be between 0.5 and 2", ErrInvalid)
+				}
+				speed = *e.Speed
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE notes SET speed = ? WHERE id = ?`, *e.Speed, n.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE notes SET speed = ? WHERE id = ?`, speed, n.ID); err != nil {
 				return err
 			}
 		}
@@ -716,6 +720,13 @@ func (s *Service) SaveSettings(ctx context.Context, st Settings) error {
 		}
 		return nil
 	})
+}
+
+// PendingJobs counts queued and running jobs (for "N notes waiting").
+func (s *Service) PendingJobs(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE state IN ('queued','leased')`).Scan(&n)
+	return n, err
 }
 
 // --- helpers -------------------------------------------------------------------

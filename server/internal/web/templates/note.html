@@ -1,0 +1,128 @@
+{{define "content"}}{{$n := .Note}}
+<h1>{{or $n.Title "Untitled note"}}</h1>
+<p class="muted small">{{if $n.CollectionName}}{{$n.CollectionName}} · {{end}}{{date $n.CreatedAt}} · {{len $n.Pages}} page{{if ne (len $n.Pages) 1}}s{{end}} {{if ne (print $n.Status) "ready"}}<span class="badge {{$n.Status}}">{{statusLabel $n.Status}}</span>{{end}}</p>
+{{if .Flash}}<div class="banner bad" role="alert">{{.Flash}}</div>{{end}}
+
+{{if eq (print $n.Status) "uploading"}}
+  {{if $n.Pages}}{{template "page-thumbs" .}}{{else}}<p class="muted">Take or choose photos of each page, in order. You can reorder them after.</p>{{end}}
+  {{template "uploader" .}}
+  <form method="post" action="/notes/{{$n.PID}}/submit">
+    <div class="row"><button class="primary" type="submit" {{if not $n.Pages}}disabled{{end}}>Read {{len $n.Pages}} page{{if ne (len $n.Pages) 1}}s{{end}}</button></div>
+  </form>
+  {{template "delete-note" .}}
+
+{{else if $n.Job}}
+  {{template "job-status" .}}
+  {{template "worker-banner" .}}
+  {{if $n.AudioVersion}}<h2>Current audio</h2>{{template "player" .}}{{end}}
+  {{template "page-thumbs" .}}
+
+{{else if eq (print $n.Status) "failed"}}
+  <div class="banner bad" role="alert"><strong>Something went wrong while {{stageLabel $n.FailedStage}}.</strong><br><span class="small">{{$n.Error}}</span></div>
+  <form method="post" action="/notes/{{$n.PID}}/retry"><div class="row"><button class="primary" type="submit">Try again</button></div></form>
+  {{if $n.AudioVersion}}<h2>Current audio</h2>{{template "player" .}}{{end}}
+  {{template "page-thumbs" .}}
+  {{template "delete-note" .}}
+
+{{else}}
+  {{if $n.AudioVersion}}
+    {{if eq (print $n.Status) "review"}}<div class="banner info small">The audio below is from before your edits. It stays until new audio is made.</div>{{end}}
+    {{template "player" .}}
+    {{if $n.Summary}}<p>{{$n.Summary}}</p>{{end}}
+    {{if $n.Tags}}<p class="row">{{range $n.Tags}}<span class="badge">{{.}}</span>{{end}}</p>{{end}}
+  {{end}}
+
+  {{if .Untranscribed}}
+  <div class="banner warn">{{.Untranscribed}} new page{{if ne .Untranscribed 1}}s haven’t{{else}} hasn’t{{end}} been read yet.
+    <form class="inline" method="post" action="/notes/{{$n.PID}}/transcribe-new"><button class="link" type="submit">Read now</button></form></div>
+  {{end}}
+
+  {{if eq (print $n.Status) "review"}}
+    {{template "review-form" .}}
+  {{else}}
+    <details><summary>Transcript</summary><pre class="transcript">{{transcriptText $n}}</pre></details>
+    <details><summary>Edit</summary>{{template "review-form" .}}</details>
+  {{end}}
+
+  <details><summary>Pages</summary>
+    {{template "page-thumbs" .}}
+    {{template "uploader" .}}
+  </details>
+  {{template "delete-note" .}}
+{{end}}
+{{end}}
+
+{{define "player"}}{{$n := .Note}}
+<div class="player card" data-title="{{or $n.Title "Untitled note"}}" data-collection="{{$n.CollectionName}}">
+  <audio controls preload="metadata" src="/notes/{{$n.PID}}/audio?v={{$n.AudioVersion}}"></audio>
+  <div class="row speeds" role="group" aria-label="Playback speed">
+    {{range speeds}}<button type="button" data-rate="{{.}}" aria-pressed="false">{{.}}×</button>{{end}}
+  </div>
+  {{if gt (len $n.Chapters) 1}}
+  <ol class="chapters">
+    {{range $n.Chapters}}<li><button type="button" data-seek="{{.Start}}">{{.Title}}</button> <span class="muted small">{{dur .Start}}</span></li>{{end}}
+  </ol>
+  {{end}}
+  <div class="row"><a class="button" href="/notes/{{$n.PID}}/audio?download=1" download>Download MP3</a> <span class="muted small">{{dur $n.AudioSeconds}}</span></div>
+</div>
+{{end}}
+
+{{define "review-form"}}{{$n := .Note}}
+<form method="post" action="/notes/{{$n.PID}}/edit">
+  <label for="title">Title</label>
+  <input id="title" type="text" name="title" value="{{$n.Title}}" maxlength="200">
+
+  <label for="coll">Collection</label>
+  <select id="coll" name="collection_id">
+    <option value="">None</option>
+    {{range .Collections}}<option value="{{.ID}}" {{if eq (deref $n.CollectionID) .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+  </select>
+
+  <h2>What was read from each page</h2>
+  <p class="muted small">Fix anything misread. <span class="flags"><span>[?word]</span></span> marks a guess, <span class="flags"><span>[illegible]</span></span> text that couldn’t be read.</p>
+  {{range $i, $p := $n.Pages}}{{if $p.Transcript}}
+  <div class="page-review">
+    <a href="/notes/{{$n.PID}}/pages/{{$p.ID}}/display" target="_blank" rel="noopener"><img src="/notes/{{$n.PID}}/pages/{{$p.ID}}/display" alt="Page {{add $i 1}}" loading="lazy"></a>
+    {{with flags (deref $p.Transcript)}}<p class="flags">Check: {{range .}}<span>{{.}}</span>{{end}}</p>{{end}}
+    <label for="t{{$p.ID}}">Page {{add $i 1}}</label>
+    <textarea class="transcript" id="t{{$p.ID}}" name="transcript-{{$p.ID}}" spellcheck="false">{{deref $p.Transcript}}</textarea>
+  </div>
+  {{end}}{{end}}
+
+  <h2>Narration</h2>
+  {{if $n.NarrationStale}}<div class="banner warn">You changed the transcript after this narration was written. Rewrite it so the audio matches.</div>{{end}}
+  <p class="muted small">This is what will be read aloud. A line starting with <code>## </code> starts a new chapter.</p>
+  <textarea id="narration" name="narration" aria-label="Narration" rows="14">{{$n.Narration}}</textarea>
+
+  <details><summary>Voice for this note</summary>
+    <label for="voice">Voice</label>
+    <select id="voice" name="voice">
+      <option value="">Default ({{voiceName .Settings.DefaultVoice}})</option>
+      {{range voices}}<option value="{{.ID}}" {{if eq $n.Voice .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    <label for="speed">Reading speed</label>
+    <select id="speed" name="speed">
+      <option value="0" {{if eq $n.Speed 0.0}}selected{{end}}>Default ({{.Settings.DefaultSpeed}}×)</option>
+      {{range readSpeeds}}<option value="{{.}}" {{if eq $n.Speed .}}selected{{end}}>{{.}}×</option>{{end}}
+    </select>
+    <p class="muted small">Reading speed is baked into the audio; the player’s speed buttons work on top of it.</p>
+  </details>
+
+  <div class="row mt">
+    {{if $n.NarrationStale}}
+      <button class="primary" type="submit" name="then" value="rewrite">Rewrite narration</button>
+      <button type="submit" name="then" value="approve-anyway">Make audio anyway</button>
+    {{else}}
+      <button class="primary" type="submit" name="then" value="approve">Make audio</button>
+      <button type="submit" name="then" value="rewrite">Rewrite narration</button>
+    {{end}}
+    <button type="submit" name="then" value="">Save</button>
+  </div>
+</form>
+{{end}}
+
+{{define "delete-note"}}
+<details><summary class="muted">Delete this note</summary>
+  <form method="post" action="/notes/{{.Note.PID}}/delete"><button class="danger" type="submit">Delete note, photos and audio</button></form>
+</details>
+{{end}}

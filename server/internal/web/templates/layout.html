@@ -1,0 +1,25 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
+<title>{{if .Title}}{{.Title}} · {{end}}notecast</title>
+<link rel="stylesheet" href="/static/app.css?v={{.Version}}">
+<link rel="icon" href="/static/icon-180.png">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<script src="/static/htmx.min.js?v={{.Version}}" defer></script>
+<script src="/static/app.js?v={{.Version}}" defer></script>
+</head>
+<body>
+<header class="top"><nav>
+  <a class="brand" href="/">notecast</a>
+  <a class="nav" href="/new">New note</a>
+  <a class="nav" href="/settings">Settings</a>
+</nav></header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}

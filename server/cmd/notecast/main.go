@@ -60,7 +60,10 @@ func run(log *slog.Logger) error {
 	svc := core.New(db, fs, nil)
 	go svc.RunReaper(ctx, 30*time.Second, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
 
-	public := http.Handler((&web.Web{Svc: svc, Log: log}).Handler())
+	public, err := (&web.Web{Svc: svc, Log: log, Version: version}).Handler()
+	if err != nil {
+		return err
+	}
 	public = auth.SameOrigin(cfg.PublicOrigin, public)
 	public = auth.Dev(cfg.DevAuthEmail, public)
 

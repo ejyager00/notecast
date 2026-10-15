@@ -1,0 +1,55 @@
+{{define "content"}}
+<h1>Settings</h1>
+{{if .Flash}}<div class="banner bad" role="alert">{{.Flash}}</div>{{end}}
+
+<h2>Processing machine</h2>
+<div class="card">
+{{with .Worker}}
+  {{if .Online}}<p><strong>Online</strong> — {{workerStateLabel .State}}{{if .Detail}} ({{.Detail}}){{end}}</p>
+  {{else if .LastSeen.IsZero}}<p><strong>Never connected.</strong></p>
+  {{else}}<p><strong>Offline</strong> — last seen {{ago .LastSeen}}.</p>{{end}}
+{{end}}
+{{if .Pending}}<p class="muted small">{{.Pending}} note{{if ne .Pending 1}}s{{end}} waiting.</p>{{end}}
+</div>
+
+<h2>Reading</h2>
+<form method="post" action="/settings">
+  <label class="check"><input type="checkbox" name="auto_approve" value="1" {{if .Settings.AutoApprove}}checked{{end}}> Make audio straight away, without the review step</label>
+  <label for="dv">Voice</label>
+  <select id="dv" name="default_voice">
+    {{range voices}}<option value="{{.ID}}" {{if eq $.Settings.DefaultVoice .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+  </select>
+  <label for="ds">Reading speed</label>
+  <select id="ds" name="default_speed">
+    {{range readSpeeds}}<option value="{{.}}" {{if eq $.Settings.DefaultSpeed .}}selected{{end}}>{{.}}×</option>{{end}}
+  </select>
+  <label for="il">Words that can’t be read</label>
+  <select id="il" name="illegible_policy">
+    <option value="skip" {{if eq .Settings.IllegiblePolicy "skip"}}selected{{end}}>Skip them</option>
+    <option value="say" {{if eq .Settings.IllegiblePolicy "say"}}selected{{end}}>Say “one word unreadable”</option>
+  </select>
+  <div class="row mt"><button class="primary" type="submit">Save</button></div>
+</form>
+
+<h2>Collections</h2>
+<p class="muted small">Group notes by class or subject. Each collection will get its own podcast feed.</p>
+{{range .Collections}}
+<div class="card">
+  <form class="row" method="post" action="/collections/{{.ID}}/rename">
+    <input class="grow" type="text" name="name" value="{{.Name}}" aria-label="Collection name" maxlength="80">
+    <button type="submit">Rename</button>
+  </form>
+  <form method="post" action="/collections/{{.ID}}/delete" class="row end">
+    <span class="muted small">{{.Notes}} note{{if ne .Notes 1}}s{{end}}</span>
+    <button class="link danger" type="submit">Delete collection (keeps notes)</button>
+  </form>
+</div>
+{{end}}
+<form class="row" method="post" action="/collections">
+  <input class="grow" type="text" name="name" placeholder="New collection" aria-label="New collection name" maxlength="80" required>
+  <button type="submit">Add</button>
+</form>
+
+<h2>Podcast feed</h2>
+<p class="muted small">Coming soon: subscribe in your podcast app and new notes arrive automatically.</p>
+{{end}}
