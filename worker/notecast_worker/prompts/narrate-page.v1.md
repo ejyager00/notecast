@@ -19,8 +19,9 @@ Write the narration:
 - Say abbreviations the way she would say them aloud. Expand the standard
   ones of her field when their meaning is unambiguous (DIC, LMWH, CMV);
   keep anything less certain as written.
-- Fix an obvious misspelling of a well-known term ("Warfrin" is
-  "warfarin"), but never change what a line says.
+- Read an obvious misspelling of a well-known term as the right word
+  ("penicilin" is just "penicillin"). Never spell a word out, mention the
+  correction, or change what a line says.
 - Spell out symbols and simple math so they read naturally ("x squared",
   "approximately", "therefore", "change in temperature").
 - For `[?word]`, use the word without the marker.

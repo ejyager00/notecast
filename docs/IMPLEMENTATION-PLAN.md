@@ -309,5 +309,8 @@ and anything the next session needs to know._
   1 h timeout for the managed llama-server, per-page OCR cache. Then
   **narration per page** (ARCHITECTURE §3.3, migration 0002): rewrites redo only
   changed pages, her edits are kept, per-page narration cache. She agreed to
-  OpenRouter for narration (docs/changelog.md); waiting on an API key, then
-  compare GLM 5.3 Flash against the local model on her note.
+  OpenRouter for both stages (docs/changelog.md). Evaluated and switched:
+  OCR Qwen3.8 27B at 2048 px, narration GLM 5.3 Flash (reasoning low);
+  `eval/ocr_bench.py --provider` benches hosted models. Local model kept as
+  fallback. Next: watch the first real note's
+  cost and quality; Phase 7 Shepherd service for the worker.

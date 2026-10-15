@@ -24,6 +24,7 @@ class ChatResult:
     seconds: float
     prompt_tokens: int | None
     completion_tokens: int | None
+    cost: float | None = None  # USD, when the provider reports it (OpenRouter does)
 
 
 class ChatProvider(Protocol):
@@ -52,6 +53,8 @@ class OpenAIChat:
     # Raise every request's max_tokens to at least this. Reasoning models
     # (GLM 5.3 can't turn thinking off) spend output tokens before answering.
     min_max_tokens: int = 0
+    # What this provider has reported spending so far (USD), for the job log.
+    spent: float = 0.0
 
     @classmethod
     def from_config(cls, name: str, cfg: dict[str, Any]) -> OpenAIChat:
@@ -103,18 +106,25 @@ class OpenAIChat:
         resp = httpx.post(
             f"{self.base_url}/chat/completions", json=body, headers=headers, timeout=self.timeout
         )
-        resp.raise_for_status()
+        # Hosted APIs explain failures in the body (no credit, bad parameter,
+        # no provider matching the routing rules); keep that in the job error.
+        if resp.status_code >= 400:
+            raise RuntimeError(f"{self.name}: HTTP {resp.status_code}: {resp.text[:500]}")
         data = resp.json()
         dt = time.monotonic() - t0
+        if data.get("error") or not data.get("choices"):
+            raise RuntimeError(f"{self.name}: {data.get('error') or 'no choices in response'}")
         choice = data["choices"][0]
         if choice.get("finish_reason") == "length":
             raise RuntimeError(f"{self.name}: output truncated at max_tokens={body['max_tokens']}")
         usage = data.get("usage") or {}
+        self.spent += usage.get("cost") or 0.0
         return ChatResult(
             text=choice["message"]["content"] or "",
             seconds=dt,
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
+            cost=usage.get("cost"),
         )
 
 

@@ -179,6 +179,7 @@ class Worker:
             job["job_id"], job["kind"], job["note_pid"], job["attempt"],
         )  # fmt: skip
         self.client.status.state = "busy"
+        spent = sum(p.spent for p in self.providers.values())
         try:
             with Heartbeat(self.client, job) as hb:
                 handlers = {
@@ -189,7 +190,8 @@ class Worker:
                 result, files = handlers[job["kind"]](job, hb)
                 hb.step("uploading results")
             self.client.complete(job, result, files)
-            log.info("job %s: done", job["job_id"])
+            cost = sum(p.spent for p in self.providers.values()) - spent
+            log.info("job %s: done%s", job["job_id"], f" (${cost:.4f} reported)" if cost else "")
         except (Aborted, LeaseLost) as e:
             log.info("job %s: abandoned (%s)", job["job_id"], e)
         except Stop:
@@ -290,6 +292,7 @@ class Worker:
         policy = job.get("illegible_policy") or "skip"
         style = self.cfg.narration_style
         name = pipeline.NARRATE_PROMPTS[style]
+        system = pipeline.prompt(name)  # in the cache key, so a prompt edit can't reuse old text
         todo = [p for p in pages if p.get("narrate")]
         segments: list[dict[str, Any]] = []
         so_far: list[str] = []
@@ -305,7 +308,7 @@ class Worker:
             before = pipeline.tail(pipeline.join_narrations(so_far))
             page_no = len(so_far) + 1
             key = hashlib.sha256(
-                repr((chat.model, name, policy, page_no, before, p["transcript"])).encode()
+                repr((chat.model, system, policy, page_no, before, p["transcript"])).encode()
             ).hexdigest()
             cached = self.narration_cache / f"{key}.txt" if self.narration_cache else None
             if cached and cached.exists():

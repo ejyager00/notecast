@@ -259,8 +259,12 @@ OpenRouter is a `kind = "openai"` provider. Its routing preferences go in
 keeps her notes away from providers that train on or keep prompts, and from any
 that would ignore the JSON schema. Reasoning models spend output tokens
 thinking before they answer; `min_max_tokens` raises every request's
-`max_tokens` to cover that. Use the plain model slug, never `:batch`: batch
-variants are only for the asynchronous Batch API, which may take 24 hours.
+`max_tokens` to cover that, and `reasoning = { effort = "low" }` in
+`extra_body` keeps it from overthinking: GLM 5.3 Flash spent 12k reasoning
+tokens narrating one page at the default, 3 at "low", with the same output.
+Two stages on different models are two provider entries. Use the plain model
+slug, never `:batch`: batch variants are only for the asynchronous Batch API,
+which may take 24 hours.
 
 Privacy is a config decision, not a code path. **Switching a stage to `cloud`
 sends her notes to that provider.** Don't do that without her agreement, and
@@ -859,5 +863,8 @@ Recorded as they come in; the details and her page images live in
 4. **Voice, speed and narration style**: chosen by her in Phase 0.
 5. **Illegible policy**: skip it or say "unreadable". Her preference, set in
    Settings.
-6. **Model choice and image size**: decided by the Phase 0 eval, not up front.
+6. ~~Model choice and image size~~: **decided 2026-10-15**, with her agreement
+   to OpenRouter: OCR on Qwen3.8 27B at 2048 px, narration on GLM 5.3 Flash
+   (reasoning effort low). The local qwen3-vl-8b stays configured as the
+   fallback (`stages = "local"`). Comparison in docs/changelog.md.
 7. **`feed_include_transcript`**: default off (§4.7).

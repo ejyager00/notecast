@@ -47,6 +47,7 @@ class FakeClient:
 
 class FakeChat:
     name, model = "fake", "fake-model"
+    spent = 0.0
 
     def __init__(self, fail: Exception | None = None) -> None:
         self.calls: list[dict[str, Any]] = []

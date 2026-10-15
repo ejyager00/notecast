@@ -8,15 +8,21 @@ runs/summary[-<run>].md.
     python eval/ocr_bench.py [--models a,b] [--sizes 1536,2048,0] [--pages DIR]
         [--truth DIR] [--run NAME] [--env K=V ...] [--arg=-c --arg=8192 ...]
         [--repeat N] [--device none]
+
+With --provider NAME, the models are names at that hosted provider from
+worker.toml (e.g. --provider openrouter --models z-ai/glm-5.3-flash), and no
+llama-server is started. That sends the page photos to the provider.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import statistics
 import time
+import tomllib
 from pathlib import Path
 
 from common import EVAL_DIR, candidates, guard_gpu, llama_model, model_names, page_images
@@ -42,6 +48,8 @@ def main() -> None:
     ap.add_argument("--arg", action="append", default=[], help="extra llama-server argument")
     ap.add_argument("--repeat", type=int, default=1, help="passes over the pages")
     ap.add_argument("--stop-on-error", action="store_true", help="abort at the first failure")
+    ap.add_argument("--provider", help="hosted provider from worker.toml instead of llama-server")
+    ap.add_argument("--config", type=Path, default=Path.home() / ".config/notecast/worker.toml")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -54,22 +62,33 @@ def main() -> None:
     sizes = [int(s) for s in args.sizes.split(",")]
     decoded = {p: images.decode(p.read_bytes()) for p in pages}
 
+    hosted = None
+    if args.provider:
+        hosted = tomllib.loads(args.config.read_text())["providers"][args.provider]
     rows = []
     for name in args.models.split(","):
-        model, body = llama_model(name, args.env, args.arg)
-        guard_gpu(model, args.device, args.force)
         prefix = f"{args.run}-" if args.run else ""
-        log_path = runs / name / f"{prefix}llama-server.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        dirname = name.replace("/", "_")
         t0 = time.monotonic()
-        with LlamaServer(model, device=args.device, log_path=log_path) as srv:
-            load_s = time.monotonic() - t0
-            vram = amd_vram()
-            chat = OpenAIChat(name, srv.base_url, name, extra_body=body)
+        if hosted:
+            server = contextlib.nullcontext(None)
+            chat = OpenAIChat.from_config(name, {**hosted, "model": name})
+            prompts = {"system": hosted.get("ocr_system"), "user": hosted.get("ocr_user")}
+        else:
+            model, body = llama_model(name, args.env, args.arg)
+            guard_gpu(model, args.device, args.force)
+            log_path = runs / dirname / f"{prefix}llama-server.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            server = LlamaServer(model, device=args.device, log_path=log_path)
             cand = candidates()[name]
             prompts = {"system": cand.get("ocr_system"), "user": cand.get("ocr_user")}
+        with server as srv:
+            load_s = time.monotonic() - t0
+            vram = amd_vram() if srv else None
+            if srv:
+                chat = OpenAIChat(name, srv.base_url, name, extra_body=body)
             for size in sizes:
-                out = runs / name / (prefix + (str(size) if size else "native"))
+                out = runs / dirname / (prefix + (str(size) if size else "native"))
                 out.mkdir(parents=True, exist_ok=True)
                 scores = []
                 errors = 0
@@ -77,10 +96,11 @@ def main() -> None:
                 for rep in range(args.repeat):
                     for p in pages:
                         jpeg = images.to_jpeg(images.fit(decoded[p], size or None), quality=92)
-                        if srv.has_died():  # GPU reset mid-run: reload (with retries)
+                        if srv and srv.has_died():  # GPU reset mid-run: reload (with retries)
                             logging.warning("llama-server died; restarting")
                             restarts += 1
                             srv.start()
+                        spent = chat.spent
                         try:
                             r = ocr_page(chat, jpeg, **prompts)
                         except Exception as e:  # record and continue
@@ -92,6 +112,8 @@ def main() -> None:
                             continue
                         (out / f"{p.stem}.md").write_text(r.markdown + "\n")
                         rec = {"page": p.stem, "pass": rep, "seconds": round(r.seconds, 2)}
+                        if chat.spent > spent:
+                            rec["usd"] = round(chat.spent - spent, 6)
                         t = truth_dir / f"{p.stem}.md"
                         if t.exists():
                             ref = t.read_text()
@@ -109,28 +131,34 @@ def main() -> None:
                         "pages": len(scores),
                         "errors": errors,
                         "restarts": restarts,
-                        "loads": f"{srv.load_attempts - srv.load_failures}/{srv.load_attempts}",
+                        "loads": f"{srv.load_attempts - srv.load_failures}/{srv.load_attempts}"
+                        if srv
+                        else "—",
                         "cer": statistics.mean(s["cer"] for s in scored) if scored else None,
                         "wer": statistics.mean(s["wer"] for s in scored) if scored else None,
                         "sec_per_page": statistics.mean(s["seconds"] for s in scores)
                         if scores
                         else None,
                         "load_s": round(load_s, 1),
+                        "usd_per_page": statistics.mean(s.get("usd", 0) for s in scores)
+                        if scores
+                        else None,
                         "vram_used_mib": vram.used_mib if vram else None,
                     }
                 )
 
     lines = [
-        "| model | size | pages | errors | restarts | loads ok | CER | WER | s/page | load s "
-        "| VRAM used MiB |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| model | size | pages | errors | restarts | loads ok | CER | WER | s/page | $/page "
+        "| load s | VRAM used MiB |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         f = lambda v, pct=False: "—" if v is None else (f"{v:.1%}" if pct else f"{v:.1f}")  # noqa: E731
+        usd = f"{r['usd_per_page']:.4f}" if r["usd_per_page"] else "—"
         lines.append(
             f"| {r['model']} | {r['size']} | {r['pages']} | {r['errors']} | {r['restarts']} | "
             f"{r['loads']} | {f(r['cer'], True)} | "
-            f"{f(r['wer'], True)} | {f(r['sec_per_page'])} | {r['load_s']} | "
+            f"{f(r['wer'], True)} | {f(r['sec_per_page'])} | {usd} | {r['load_s']} | "
             f"{r['vram_used_mib'] or '—'} |"
         )
     summary = runs / (f"summary-{args.run}.md" if args.run else "summary.md")
