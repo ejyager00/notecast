@@ -39,9 +39,6 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("config:\n%w", err)
 	}
-	if cfg.AccessAUD != "" {
-		return errors.New("cloudflare access verification arrives in Phase 5; use DEV_AUTH_EMAIL on loopback for now")
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -60,12 +57,18 @@ func run(log *slog.Logger) error {
 	svc := core.New(db, fs, nil)
 	go svc.RunReaper(ctx, 30*time.Second, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
 
-	public, err := (&web.Web{Svc: svc, Log: log, Version: version}).Handler()
+	app, open, err := (&web.Web{Svc: svc, Log: log, Version: version}).Handlers()
 	if err != nil {
 		return err
 	}
-	public = auth.SameOrigin(cfg.PublicOrigin, public)
-	public = auth.Dev(cfg.DevAuthEmail, public)
+	app = auth.SameOrigin(cfg.PublicOrigin, app)
+	if cfg.DevAuthEmail != "" {
+		log.Warn("DEV_AUTH_EMAIL set: authentication is bypassed (loopback only)", "email", cfg.DevAuthEmail)
+		app = auth.Dev(cfg.DevAuthEmail, app)
+	} else {
+		app = auth.Access(auth.NewAccessVerifier(ctx, cfg.AccessTeamDomain, cfg.AccessAUD, cfg.AllowedEmails), app)
+	}
+	public := auth.Exempt(web.OpenPrefixes, open, app)
 
 	servers := []*http.Server{
 		{

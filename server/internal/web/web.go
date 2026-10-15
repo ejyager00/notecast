@@ -22,14 +22,21 @@ type Web struct {
 	tmpl templates
 }
 
-func (h *Web) Handler() (http.Handler, error) {
+// Handlers returns the app (everything behind authentication) and the open
+// handler (the few routes that skip it: health check, and the podcast feed
+// which podcast apps fetch without a login). They are separate muxes, so no
+// path trick can reach an app route through the open side.
+func (h *Web) Handlers() (app, open http.Handler, err error) {
 	t, err := loadTemplates()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	h.tmpl = t
+
+	openMux := http.NewServeMux()
+	openMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 	mux.Handle("GET /static/", h.static())
 	mux.HandleFunc("GET /{$}", h.library)
 	mux.HandleFunc("GET /search", h.library)
@@ -47,8 +54,11 @@ func (h *Web) Handler() (http.Handler, error) {
 	mux.HandleFunc("POST /notes/{pid}/pages/{id}/{action}", h.pageAction)
 	mux.HandleFunc("POST /notes/{pid}/edit", h.edit)
 	mux.HandleFunc("POST /notes/{pid}/{action}", h.noteAction)
-	return securityHeaders(mux), nil
+	return securityHeaders(mux), securityHeaders(openMux), nil
 }
+
+// OpenPrefixes are the paths served by the open handler.
+var OpenPrefixes = []string{"/healthz", "/feed/"}
 
 // fail answers with an error page (or plain text for the upload XHR, which
 // shows the response body next to the file).
