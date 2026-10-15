@@ -592,6 +592,10 @@ func (h *Web) static() http.Handler {
 			// URLs carry ?v=<version>, so a deploy busts the cache.
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
+		if strings.HasSuffix(r.URL.Path, ".mp3") {
+			// Go's built-in MIME table lacks .mp3 (voice samples).
+			w.Header().Set("Content-Type", "audio/mpeg")
+		}
 		files.ServeHTTP(w, r)
 	}))
 }

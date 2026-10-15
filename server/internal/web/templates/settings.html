@@ -16,9 +16,12 @@
 <form method="post" action="/settings">
   <label class="check"><input type="checkbox" name="auto_approve" value="1" {{if .Settings.AutoApprove}}checked{{end}}> Make audio straight away, without the review step</label>
   <label for="dv">Voice</label>
-  <select id="dv" name="default_voice">
-    {{range voices}}<option value="{{.ID}}" {{if eq $.Settings.DefaultVoice .ID}}selected{{end}}>{{.Name}}</option>{{end}}
-  </select>
+  <div class="row">
+    <select class="grow" id="dv" name="default_voice">
+      {{range voices}}<option value="{{.ID}}" {{if eq $.Settings.DefaultVoice .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    <button type="button" data-sample-voice="dv" data-sample-speed="ds" data-default-voice="{{$.Settings.DefaultVoice}}" data-default-speed="{{$.Settings.DefaultSpeed}}" data-v="{{$.Version}}">▶ Sample</button>
+  </div>
   <label for="ds">Reading speed</label>
   <select id="ds" name="default_speed">
     {{range readSpeeds}}<option value="{{.}}" {{if eq $.Settings.DefaultSpeed .}}selected{{end}}>{{.}}×</option>{{end}}

@@ -96,10 +96,13 @@
 
   <details><summary>Voice for this note</summary>
     <label for="voice">Voice</label>
-    <select id="voice" name="voice">
-      <option value="">Default ({{voiceName .Settings.DefaultVoice}})</option>
-      {{range voices}}<option value="{{.ID}}" {{if eq $n.Voice .ID}}selected{{end}}>{{.Name}}</option>{{end}}
-    </select>
+    <div class="row">
+      <select class="grow" id="voice" name="voice">
+        <option value="">Default ({{voiceName .Settings.DefaultVoice}})</option>
+        {{range voices}}<option value="{{.ID}}" {{if eq $n.Voice .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      <button type="button" data-sample-voice="voice" data-sample-speed="speed" data-default-voice="{{.Settings.DefaultVoice}}" data-default-speed="{{.Settings.DefaultSpeed}}" data-v="{{.Version}}">▶ Sample</button>
+    </div>
     <label for="speed">Reading speed</label>
     <select id="speed" name="speed">
       <option value="0" {{if eq $n.Speed 0.0}}selected{{end}}>Default ({{.Settings.DefaultSpeed}}×)</option>

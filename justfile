@@ -52,6 +52,10 @@ eval-render *ARGS:
 eval-voices *ARGS:
     {{guix_shell}} sh -c 'cd eval && PYTHONPATH=../worker python3 voices.py {{ARGS}}'
 
+# Voice samples for the app's "Sample" buttons (server/internal/web/static/voices).
+voice-samples *ARGS:
+    {{guix_shell}} sh -c 'PYTHONPATH=worker nice -n 19 python3 worker/scripts/voice_samples.py {{ARGS}}'
+
 shell:
     {{guix_shell}} bash
 

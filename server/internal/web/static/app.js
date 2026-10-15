@@ -105,3 +105,32 @@ document.addEventListener("click", async (ev) => {
   b.textContent = "Copied";
   setTimeout(() => { b.textContent = label; }, 1500);
 });
+
+// --- voice samples: the selected voice at the selected reading speed ---
+// Samples are recorded at 1.0x; playbackRate approximates the baked-in speed.
+const sample = { audio: null, button: null };
+function stopSample() {
+  if (sample.audio) sample.audio.pause();
+  if (sample.button) sample.button.textContent = "▶ Sample";
+  sample.audio = sample.button = null;
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-sample-voice]");
+  if (!b) return;
+  const wasPlaying = sample.button === b;
+  stopSample();
+  if (wasPlaying) return;
+  const voice = document.getElementById(b.dataset.sampleVoice).value || b.dataset.defaultVoice;
+  const speed = parseFloat(document.getElementById(b.dataset.sampleSpeed).value) || parseFloat(b.dataset.defaultSpeed) || 1;
+  const a = new Audio("/static/voices/" + encodeURIComponent(voice) + ".mp3?v=" + encodeURIComponent(b.dataset.v));
+  a.playbackRate = a.defaultPlaybackRate = speed;
+  a.addEventListener("loadedmetadata", () => { a.playbackRate = speed; });
+  a.addEventListener("ended", stopSample);
+  a.addEventListener("error", () => { stopSample(); b.textContent = "No sample"; });
+  sample.audio = a; sample.button = b;
+  b.textContent = "■ Stop";
+  a.play().catch(stopSample);
+});
+document.addEventListener("change", (ev) => {
+  if (sample.button && (ev.target.id === sample.button.dataset.sampleVoice || ev.target.id === sample.button.dataset.sampleSpeed)) stopSample();
+});
