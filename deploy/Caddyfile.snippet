@@ -1,0 +1,9 @@
+# Add next to the existing http://git.yager.me block in
+# ~/.config/containers/systemd/Caddyfile. Plain HTTP: Cloudflare terminates
+# TLS at the edge and cloudflared reaches Caddy over the home network.
+http://notecast.yager.me {
+	reverse_proxy 100.97.104.119:8790 {
+		header_up X-Real-IP {header.CF-Connecting-IP}
+		header_up X-Forwarded-Proto https
+	}
+}

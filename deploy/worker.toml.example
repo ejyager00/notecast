@@ -1,0 +1,39 @@
+# ~/.config/notecast/worker.toml on roundabits. No secrets in here.
+
+[server]
+url = "http://100.97.104.119:8791"          # asahihome worker listener, over the tailnet
+token_file = "~/.config/notecast/token"     # 0600; canonical copy in Vaultwarden
+# worker_id defaults to the hostname
+
+[llama]                                     # the llama-server the worker manages
+name = "qwen3-vl-8b"                        # TBD by the Phase 0 eval
+model = "qwen3-vl-8b-q8_0.gguf"             # names from worker/models.lock
+mmproj = "qwen3-vl-8b-mmproj-f16.gguf"
+ctx = 16384
+args = ["--image-max-tokens", "4096"]
+device = "none"                             # CPU. The GPU is disabled; see ARCHITECTURE §11a.
+idle_unload_seconds = 1800
+
+[providers.local]
+kind = "openai"
+managed = true                              # base_url comes from [llama]
+
+# [providers.cloud]                         # only with her agreement (ARCHITECTURE §3.4)
+# kind = "openai"
+# base_url = "https://…/v1"
+# model = "…"
+# api_key_file = "~/.config/notecast/cloud_key"
+
+[stages]
+ocr = "local"
+narrate = "local"
+
+[images]
+ocr_long_edge = 1536                        # TBD by the Phase 0 eval
+
+[narration]
+style = "prose"                             # or "quiz"; her choice after listening
+
+[tts]
+model = "kokoro-v1.0.onnx"
+voices = "kokoro-voices-v1.0.bin"

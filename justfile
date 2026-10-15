@@ -54,3 +54,16 @@ eval-voices *ARGS:
 
 shell:
     {{guix_shell}} bash
+
+# Run the real worker against a server (default: `just dev`, token "dev-token").
+worker CONFIG=(env_var("HOME") / ".config/notecast/worker.toml"):
+    {{guix_shell}} sh -c 'cd worker && PYTHONPATH=. python3 -m notecast_worker.main --config {{CONFIG}}'
+
+# Build, ship to asahihome, repoint `current`, restart, and health-check.
+deploy: build-release
+    #!/usr/bin/env sh
+    set -eu
+    bin=$(ls -t dist/notecast-* | head -1); name=$(basename "$bin")
+    scp "$bin" asahihome:opt/notecast/releases/
+    ssh asahihome "chmod +x ~/opt/notecast/releases/$name && ln -sfn ~/opt/notecast/releases/$name ~/opt/notecast/releases/current && systemctl --user restart notecast && sleep 2 && systemctl --user is-active notecast && curl -sf http://100.97.104.119:8790/healthz"
+    echo "deployed $name"

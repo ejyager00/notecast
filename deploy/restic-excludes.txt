@@ -1,0 +1,5 @@
+# Append to /etc/restic/excludes (root; ask Eric). The dump is the restorable
+# copy of the database; a raw WAL paired with the wrong db is corruption.
+/mnt/data/volumes/notecast/app.db-wal
+/mnt/data/volumes/notecast/app.db-shm
+/mnt/data/volumes/notecast/tmp

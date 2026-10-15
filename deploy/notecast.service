@@ -1,0 +1,36 @@
+# notecast server on asahihome. Lives in ~/.config/containers/systemd/ and is
+# symlinked into ~/.config/systemd/user/ (the box's backup convention for
+# non-Quadlet units). See deploy/RUNBOOK.md.
+[Unit]
+Description=notecast — notecast.yager.me
+After=network-online.target tailscaled.service
+Wants=network-online.target
+OnFailure=notify-failure@%n.service
+
+[Service]
+ExecStart=/home/eric/opt/notecast/releases/current
+Environment=DATA_DIR=/mnt/data/volumes/notecast
+# Tailnet address: Caddy (a rootless container) reaches host processes here,
+# and so does the worker on roundabits. Not loopback; see ARCHITECTURE §1.
+Environment=PUBLIC_BIND=100.97.104.119:8790
+Environment=WORKER_BIND=100.97.104.119:8791
+Environment=PUBLIC_ORIGIN=https://notecast.yager.me
+Environment=CF_ACCESS_TEAM_DOMAIN=REPLACE-ME.cloudflareaccess.com
+Environment=CF_ACCESS_AUD=REPLACE-ME
+Environment=NOTIFY_CMD=/home/eric/.config/containers/systemd/notify.sh
+# ALLOWED_EMAILS and WORKER_TOKEN_SHA256 live outside git: one holds her
+# address, and keeping both together keeps the unit generic.
+EnvironmentFile=/mnt/data/volumes/notecast/notecast.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/mnt/data/volumes/notecast
+# notify.sh keeps its rate-limit state here; optional ("-") so a missing dir
+# doesn't stop the service (notify.sh then just sends without limiting).
+ReadWritePaths=-%t/asahihome-notify
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target
