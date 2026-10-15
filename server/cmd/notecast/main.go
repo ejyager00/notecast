@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"git.ericbits.win/eric/notecast/server/internal/alert"
 	"git.ericbits.win/eric/notecast/server/internal/auth"
 	"git.ericbits.win/eric/notecast/server/internal/config"
 	"git.ericbits.win/eric/notecast/server/internal/core"
@@ -56,6 +57,10 @@ func run(log *slog.Logger) error {
 	}
 	svc := core.New(db, fs, nil)
 	go svc.RunReaper(ctx, 30*time.Second, func(f string, a ...any) { log.Warn(fmt.Sprintf(f, a...)) })
+	if cfg.NotifyCmd != "" {
+		w := &alert.Watcher{Svc: svc, Notify: alert.Command(cfg.NotifyCmd), Threshold: 2 * time.Hour, Now: time.Now, Log: log}
+		go w.Run(ctx, 5*time.Minute)
+	}
 
 	app, open, err := (&web.Web{Svc: svc, Log: log, Version: version, Origin: cfg.PublicOrigin}).Handlers()
 	if err != nil {

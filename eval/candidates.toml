@@ -1,0 +1,34 @@
+# Phase 0 OCR candidates. `ctx` and `args` go to llama-server; `body` is
+# merged into every chat request. File names refer to worker/models.lock.
+
+[qwen3-vl-8b]
+model = "qwen3-vl-8b-q8_0.gguf"
+mmproj = "qwen3-vl-8b-mmproj-f16.gguf"
+ctx = 16384
+args = ["--image-max-tokens", "4096"]
+
+[qwen35-9b]
+model = "qwen3.5-9b-q8_0.gguf"
+mmproj = "qwen3.5-9b-mmproj-f16.gguf"
+ctx = 16384
+args = ["--image-max-tokens", "4096"]
+
+[gemma-4-12b]
+model = "gemma-4-12b-q8_0.gguf"
+mmproj = "gemma-4-12b-mmproj-bf16.gguf"
+ctx = 8192
+args = []
+
+[glm-ocr]
+model = "glm-ocr-q8_0.gguf"
+mmproj = "glm-ocr-mmproj-q8_0.gguf"
+ctx = 8192
+args = []
+# Trained on fixed task prompts, no system prompt (zai-org/GLM-OCR card).
+ocr_system = ""
+ocr_user = "Text Recognition:"
+
+# Applied to every candidate: device-level workarounds (see RESULTS.md).
+[_all]
+env = {}
+args = []

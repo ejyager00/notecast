@@ -294,5 +294,12 @@ fetch-models`.
 _Update at the end of every session: current phase, what's done, what's next,
 and anything the next session needs to know._
 
-- 2026-10-14: plan written. Nothing built. Next: Phase 0. Needs ~15–20 photos
-  of her notes and her time for ground truth and voice selection.
+- 2026-10-14: plan written.
+- 2026-10-14 (later): Phases 1, 2 and 4 done; Phase 5 and 6 *code* done
+  (Access JWT verification, podcast feeds, worker-offline alert). Deploy steps
+  of Phases 5–6 not started (need Eric: Cloudflare dashboard, asahihome).
+  Phase 0: Kokoro packaged in Guix (channel d4305d1, not pushed), models
+  downloaded, 9 full-res HEIC pages in ~/notecast-eval/pages, draft truth for
+  3 pages. **GPU abandoned** (ARCHITECTURE §11a): CPU-only from here.
+  Next: CPU OCR eval on full-res pages; Python worker main loop (client.py,
+  main.py) against the real worker API; deploy files.

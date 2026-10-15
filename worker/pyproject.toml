@@ -1,0 +1,24 @@
+[project]
+name = "notecast-worker"
+version = "0.1.0"
+description = "OCR, narration and TTS worker for notecast"
+requires-python = ">=3.12"
+# Dependencies come from Guix (manifest.scm), not pip. This list documents
+# them and lets the sanity check catch a missing one.
+dependencies = ["httpx", "kokoro-onnx", "mutagen", "numpy", "pillow", "soundfile"]
+
+[project.scripts]
+notecast-worker = "notecast_worker.main:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["notecast_worker*"]
+
+[tool.setuptools.package-data]
+notecast_worker = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

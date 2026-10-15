@@ -21,7 +21,7 @@ type Config struct {
 	DevAuthEmail      string
 	AccessTeamDomain  string
 	AccessAUD         string
-	NtfyURL           string
+	NotifyCmd         string // e.g. the box's notify.sh; empty = no alerts
 }
 
 func FromEnv() (*Config, error) { return parse(os.Getenv) }
@@ -35,7 +35,7 @@ func parse(get func(string) string) (*Config, error) {
 		DevAuthEmail:     get("DEV_AUTH_EMAIL"),
 		AccessTeamDomain: get("CF_ACCESS_TEAM_DOMAIN"),
 		AccessAUD:        get("CF_ACCESS_AUD"),
-		NtfyURL:          get("NTFY_URL"),
+		NotifyCmd:        get("NOTIFY_CMD"),
 	}
 	for _, e := range strings.Split(get("ALLOWED_EMAILS"), ",") {
 		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {

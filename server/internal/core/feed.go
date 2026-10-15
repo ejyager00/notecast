@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"time"
+
+	"git.ericbits.win/eric/notecast/server/internal/store"
 )
 
 // RotateFeedToken issues a new feed token, invalidating every old feed URL.
@@ -119,4 +121,17 @@ func (s *Service) ChaptersJSON(ctx context.Context, pid string) ([]byte, error) 
 		doc.Chapters = append(doc.Chapters, ch{c.Start, c.Title})
 	}
 	return json.Marshal(doc)
+}
+
+// OldestQueued returns when the longest-waiting queued job was created.
+func (s *Service) OldestQueued(ctx context.Context) (time.Time, bool, error) {
+	var ts sql.NullString
+	if err := s.db.QueryRowContext(ctx, `SELECT MIN(created_at) FROM jobs WHERE state = 'queued'`).Scan(&ts); err != nil {
+		return time.Time{}, false, err
+	}
+	if !ts.Valid {
+		return time.Time{}, false, nil
+	}
+	t, err := store.ParseTime(ts.String)
+	return t, err == nil, err
 }

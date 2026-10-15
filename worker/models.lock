@@ -1,0 +1,97 @@
+# Pinned model weights for the worker. Fetched and verified by
+# `just fetch-models` (worker/scripts/fetch_models.py) into
+# $NOTECAST_MODELS_DIR (default ~/.local/share/notecast/models).
+#
+# Each [[file]] is one download. `group` ties a GGUF to its mmproj; the
+# worker config refers to files by `name`. Hugging Face URLs are pinned to a
+# commit, so a re-upload upstream can't change what we get. The sha256 is
+# checked regardless.
+#
+# The four VLMs are Phase 0 candidates (see docs/IMPLEMENTATION-PLAN.md);
+# all but the winner get dropped after the eval.
+
+# --- OCR / narration candidates (llama-server, Vulkan) ---------------------
+
+[[file]]
+name = "qwen3-vl-8b-q8_0.gguf"
+group = "qwen3-vl-8b"
+url = "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/Qwen3VL-8B-Instruct-Q8_0.gguf"
+sha256 = "0d264b3941185d00a74f75c4245521dae088ff1efc90ab8d1754e83f5844adb0"
+size = 8709519456
+license = "apache-2.0"
+
+[[file]]
+name = "qwen3-vl-8b-mmproj-f16.gguf"
+group = "qwen3-vl-8b"
+url = "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf"
+sha256 = "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"
+size = 1159029824
+license = "apache-2.0"
+
+[[file]]
+name = "qwen3.5-9b-q8_0.gguf"
+group = "qwen3.5-9b"
+url = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q8_0.gguf"
+sha256 = "809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4"
+size = 9527502048
+license = "apache-2.0"
+
+[[file]]
+name = "qwen3.5-9b-mmproj-f16.gguf"
+group = "qwen3.5-9b"
+url = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/mmproj-F16.gguf"
+sha256 = "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
+size = 918166080
+license = "apache-2.0"
+
+[[file]]
+name = "gemma-4-12b-q8_0.gguf"
+group = "gemma-4-12b"
+url = "https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF/resolve/e3e681731089efaa3f0917336944ac64752db8ba/gemma-4-12B-it-Q8_0.gguf"
+sha256 = "abfc3044b93795f6a446fc1a04468ac2d5fc5e9c92e237f09a5b3384c5a433e4"
+size = 12669646976
+license = "apache-2.0"
+
+[[file]]
+name = "gemma-4-12b-mmproj-bf16.gguf"
+group = "gemma-4-12b"
+url = "https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF/resolve/e3e681731089efaa3f0917336944ac64752db8ba/mmproj-gemma-4-12B-it-BF16.gguf"
+sha256 = "9b1edfa05b634728ca4bfd60b4e6b278e95166c078fa54ae4fa83e680112fd1d"
+size = 175115616
+license = "apache-2.0"
+
+# Dedicated small OCR model: a baseline, and a check on whether a
+# general VLM is even needed.
+[[file]]
+name = "glm-ocr-q8_0.gguf"
+group = "glm-ocr"
+url = "https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/65a42de1148dbed2297e922b5dbc7d9b70c36578/GLM-OCR-Q8_0.gguf"
+sha256 = "45bc244a6446aff850521dc41f18bc8d7105ad5f0c2c8c28af04e7cc4f4d50b1"
+size = 950433408
+license = "unknown (check model card before keeping)"
+
+[[file]]
+name = "glm-ocr-mmproj-q8_0.gguf"
+group = "glm-ocr"
+url = "https://huggingface.co/ggml-org/GLM-OCR-GGUF/resolve/65a42de1148dbed2297e922b5dbc7d9b70c36578/mmproj-GLM-OCR-Q8_0.gguf"
+sha256 = "9c4b58e33e316ed142eb5dcb41abec3844d3e6e5dc361ffb782c3fa9d175141f"
+size = 484403648
+license = "unknown (check model card before keeping)"
+
+# --- TTS (Kokoro-82M, onnxruntime, CPU) -------------------------------------
+
+[[file]]
+name = "kokoro-v1.0.onnx"
+group = "kokoro"
+url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
+sha256 = "beb0d1848dee9a49da392cc3df26958d46cfa35d321edf434f52949153f0df3a"
+size = 325505369
+license = "apache-2.0"
+
+[[file]]
+name = "kokoro-voices-v1.0.bin"
+group = "kokoro"
+url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
+sha256 = "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+size = 28214398
+license = "apache-2.0"

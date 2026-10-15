@@ -524,6 +524,10 @@ worker/notecast_worker/
 
 ### 6.3 llama-server lifecycle and the GPU guard
 
+> **Currently CPU-only** (see §11a). The GPU parts below describe the design
+> if the GPU becomes usable; today `device="none"` and none of the VRAM
+> logic runs.
+
 - The worker **spawns llama-server itself** when a GPU job arrives, binding
   `127.0.0.1:8092`, with `--device Vulkan0` (otherwise llama.cpp may also use
   the Intel iGPU it detects as `Vulkan1`), `-ngl 99`, `--mmproj`, and a context
@@ -783,9 +787,22 @@ Recorded as they come in; the details and her page images live in
   transfer), about 15 px per handwritten line, which is too small to judge
   models fairly. The upload path keeps originals, so production uploads are
   full resolution. The eval needs originals too.
-- **Never test the GPU next to a running game.** The first GPU load hit an
-  amdgpu reset while Minecraft was running. The worker's GPU guard (§6.3) is
-  the protection; the eval scripts must use it too.
+- **The worker runs on the CPU; the GPU is disabled.** (Decided 2026-10-14.)
+  On roundabits, llama.cpp's Vulkan backend on the RX 6900 XT hit amdgpu
+  device loss (`ring sdma1 timeout` in the kernel log) during model load,
+  intermittently at first and then on every attempt, including a 1 GB model
+  after a 30 s settle. Repeated attempts eventually took the desktop session
+  down. The same `sdma1` and `gfx` timeouts appear at boot with no compute
+  load, so the cause is the kernel/driver/firmware on this machine, not
+  notecast, and fixing that is a separate project. Consequences:
+  - `LlamaServer` defaults to `device="none"`, refuses a GPU device unless
+    `NOTECAST_ALLOW_GPU=1`, and runs llama-server with
+    `VK_LOADER_DRIVERS_DISABLE=*` so it can't open a GPU context at all.
+  - OCR costs ~90 s per page on the 13700K for an 8B model. Jobs are queued
+    and she reviews later anyway, so that's acceptable. Smaller or dedicated
+    OCR models matter more now (Phase 0 eval).
+  - The GPU guard (§6.3), idle unload and load retry stay in the code, unused
+    until the GPU is trustworthy again.
 
 ## 12. Open decisions (TBD)
 
